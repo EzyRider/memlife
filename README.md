@@ -245,7 +245,7 @@ Claude Desktop config:
 | **Zero-dependency mode** | Yes (DummyEmbedder) | No | No | No |
 | **MCP server** | Yes | No | No | No |
 | **Backend** | SQLite (single file) | Various | SQLite | Neo4j |
-| **Multi-user** | No (single-agent) | Yes | No | Yes |
+| **Multi-user** | No (single-agent) | Yes | Yes (by wing) | Yes |
 | **Graph reasoning** | No | No | No | Yes |
 | **Self-hosted/local** | Yes | Yes | Yes | Requires Neo4j |
 
