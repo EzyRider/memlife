@@ -1,9 +1,6 @@
-"""Garbage collection and import/export for the memory store."""
+"""Garbage collection for the memory store."""
 
 from __future__ import annotations
-
-import json
-import time
 
 from memlife.store import MemoryStore
 
@@ -19,8 +16,8 @@ def run_gc(
 ) -> dict:
     """Run garbage collection on old/superseded data.
 
-    Delegates to MemoryStore.run_gc() — this wrapper exists so the
-    GC module is the canonical entry point for both GC and import/export.
+    Delegates to MemoryStore.run_gc() — this wrapper is the public entry
+    point. Most callers should use ``store.run_gc()`` directly.
     """
     return store.run_gc(
         superseded_facts_days=superseded_facts_days,
