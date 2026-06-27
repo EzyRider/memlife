@@ -175,7 +175,13 @@ Expose memlife to any MCP-compatible agent (Claude Desktop, Cursor, etc.):
 memlife-mcp-server --db ./mem.db --embedder ollama --embedding-model mxbai-embed-large:latest
 ```
 
-Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Claude Desktop config:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
