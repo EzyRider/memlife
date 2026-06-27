@@ -29,8 +29,8 @@ sentence-transformers = ["sentence-transformers"]
 mcp = ["mcp"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
 
-[project.scripts]
-memlife-mcp-server = "memlife.mcp_server:main"
+# [project.scripts]
+# memlife-mcp-server = "memlife.mcp_server:main"  # Phase 3: MCP server not yet implemented
 
 [tool.setuptools.packages.find]
 where = ["src"]

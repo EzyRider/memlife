@@ -14,9 +14,8 @@ from memlife import (
 
 async def main():
     # Create a store with the dummy embedder (no external dependencies)
-    config = MemoryConfig(db_path="/tmp/memlife_quickstart.db")
+    config = MemoryConfig(db_path="/tmp/memlife_quickstart.db", embedding_model="dummy")
     store = MemoryStore(config=config, embedder=DummyEmbedder())
-    store.embedding_model_name = "dummy"
 
     # Store an episode (something that happened)
     ep_id = store.remember(

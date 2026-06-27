@@ -21,13 +21,12 @@ def temp_db(tmp_path):
 @pytest.fixture
 def config(temp_db):
     """A MemoryConfig pointed at the temp DB."""
-    return MemoryConfig(db_path=temp_db)
+    return MemoryConfig(db_path=temp_db, embedding_model="dummy")
 
 
 @pytest.fixture
 def store(config):
     """A MemoryStore with DummyEmbedder."""
     s = MemoryStore(config=config, embedder=DummyEmbedder())
-    s.embedding_model_name = "dummy"
     yield s
     s.close()

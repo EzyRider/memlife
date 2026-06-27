@@ -63,10 +63,8 @@ class MemoryStore:
         self.db_path = config.db_path
         self.embedder = embedder
         self.config = config
-        # Embedding model name — stored with each vector so we can detect
-        # when the model changes and trigger a backfill. Set from Config by
-        # the agent; empty string means "not tracked" (pre-versioning rows).
-        self.embedding_model_name: str = ""
+        # Embedding model name from config — stored with each vector for versioning.
+        self.embedding_model_name: str = config.embedding_model
         # Cosine above which two facts are treated as the same fact at store
         # time and merged (the loser superseded). Set from Config by the agent;
         # tests construct MemoryStore directly so this default is the source of
@@ -1146,7 +1144,7 @@ class MemoryStore:
             id=r[0], type=r[1], content=r[2], confidence=r[3],
             source_episodes_json=r[4] or "[]", private=bool(r[5]),
             created_at=r[6], superseded_by=r[7] or "",
-            embedding_json=r[8] or "" if len(r) > 8 else "",
+            embedding_json=(r[8] or "") if len(r) > 8 else "",
         )
 
     def _active_journal_sql(self, select: str, extra_where: str = "") -> str:
