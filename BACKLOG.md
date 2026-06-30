@@ -133,10 +133,185 @@ pass.
 
 ## Notes
 
-- MF-001 and MF-002 are bug fixes that should land before any V2 architecture work.
+### MF-008: `fact_conflict_threshold` not initialized in `MemoryStore.__init__`
+**Priority:** Critical
+**Source:** Second-agent code review, July 2026
+
+`self.fact_conflict_threshold` is referenced in `check_conflicts()` but is
+never initialized in `MemoryStore.__init__`. Calling `store.check_conflicts()`
+raises `AttributeError`. This is exposed through the public API including
+`SyncMemoryStore.check_conflicts()`.
+
+**Fix:** Initialize both thresholds from `MemoryConfig`:
+
+```python
+self.fact_merge_threshold = config.fact_merge_threshold
+self.fact_conflict_threshold = config.fact_conflict_threshold
+```
+
+Add matching fields to `MemoryConfig` if they do not already exist. This is a
+blocking bug for any consumer using contradiction detection.
+
+### MF-009: Episode pruning missing from `run_gc()`
+**Priority:** High
+**Source:** Second-agent code review, July 2026
+
+`run_gc()` prunes superseded facts, journal, agent runs, checkpoints, metrics,
+and reflection queue entries, but it never deletes from the `episodes` table or
+the `episode_tools` index. Episodes therefore grow indefinitely, which directly
+contradicts memlife's core thesis of graceful degradation.
+
+**Fix:** Add episode pruning to `run_gc()` with a configurable retention
+period (e.g. `gc_episodes_days=180` in `MemoryConfig`). Prune old episodes and
+clean up orphaned `episode_tools` rows:
+
+```python
+cur = self.conn.execute(
+    "DELETE FROM episodes WHERE created_at < ?", (cutoff_episodes,))
+pruned["episodes"] = cur.rowcount
+self.conn.execute(
+    "DELETE FROM episode_tools WHERE episode_id NOT IN "
+    "(SELECT id FROM episodes)")
+```
+
+### MF-010: Hardcoded "Ingrid" agent name in Reflector prompt
+**Priority:** Medium
+**Source:** Second-agent code review, July 2026
+
+The Reflector system prompt says "You are Ingrid's reflective faculty." This
+is a single-agent leftover in what should be a general-purpose library. Any
+other consumer of memlife gets reflections framed as Ingrid.
+
+**Fix:** Make the agent name configurable with a sensible default:
+
+```python
+def __init__(self, ..., agent_name: str = "the agent"):
+    self.agent_name = agent_name
+```
+
+Use `f"You are {self.agent_name}'s reflective faculty."` in the prompt.
+
+### MF-011: Hardcoded model names in Reflector and adapters
+**Priority:** Medium
+**Source:** Second-agent code review, July 2026
+
+`Reflector` and the Ollama adapter hardcode model identifiers such as
+`qwen3.5:cloud`, `deepseek-v4-flash:cloud`, and `kimi-k2.7-code:cloud`. These
+are deployment-specific names that will not exist for other users, leading to
+confusing failures.
+
+**Fix:** Remove model-specific defaults. Require callers to pass a model name,
+raise a clear error if unset, and document the requirement in the adapter and
+`Reflector` constructors.
+
+### MF-012: SQL injection in `import_jsonl` via column names
+**Priority:** High
+**Source:** Second-agent code review, July 2026
+
+`import_jsonl()` interpolates JSONL keys directly into the SQL INSERT
+statement. A malicious backup/migration file can inject arbitrary SQL via
+column names such as `"id) VALUES (1); DROP TABLE facts; --"`.
+
+**Fix:** Whitelist allowed columns per table and reject unknown keys before
+building the query. Values are already parameterized; only the column names are
+vulnerable.
+
+### MF-013: `_tokenize` drops tokens shorter than 3 characters
+**Priority:** Medium
+**Source:** Second-agent code review, July 2026
+
+`_tokenize()` filters out tokens with `len < 3`. Important short terms such as
+"AI", "ML", "Go", "C", "OS", and "Py" become invisible to keyword search. A
+query for "AI deployment" is reduced to just "deployment".
+
+**Fix:** Lower the minimum token length to 2, or replace the length filter
+with a proper stop-word list. At minimum, document the behavior.
+
+### MF-014: `DummyEmbedder` hash vectors produce misleading cosine similarity
+**Priority:** Medium
+**Source:** Second-agent code review, July 2026
+
+`DummyEmbedder` uses hash-based vectors. Semantically similar sentences can
+receive negative cosine similarity, while unrelated sentences get near-zero.
+This makes semantic merge and conflict detection behave worse than random when
+the dummy embedder is used.
+
+**Fix:** Replace hash vectors with a bag-of-words approach so similar
+sentences receive positive cosine similarity:
+
+```python
+def _bow_vector(text, dim=128):
+    tokens = re.findall(r"[a-z0-9_]+", text.lower())
+    vec = [0.0] * dim
+    for tok in tokens:
+        vec[hash(tok) % dim] += 1.0
+    return vec
+```
+
+### MF-015: Lexical contradiction threshold too aggressive for small fact sets
+**Priority:** Medium
+**Source:** Second-agent code review, July 2026
+
+In `reflection.py`, `threshold = max(2, len(facts) * 0.3)`. For 3 facts the
+threshold is 2, so any term appearing in all 3 facts is treated as "common"
+and filtered out. This causes contradictions to be missed in small fact sets.
+
+**Fix:** Use a higher multiplier or a fixed minimum:
+
+```python
+threshold = max(3, len(facts) * 0.5)
+```
+
+### MF-016: Robustness and correctness pass
+**Priority:** Low
+**Source:** Second-agent code review, July 2026
+
+A collection of smaller correctness, API-hygiene, and documentation issues
+that do not each need their own backlog item but should be swept in one pass:
+
+- `SyncMemoryStore._run()` swallows the "already running" `RuntimeError` then
+calls `asyncio.run()` from inside a running loop; fix the exception path.
+- `MemoryStore._lock` only guards connection creation, not subsequent DB
+access; document or serialize concurrent access.
+- `get_last_checkpoint()` does not handle `json.JSONDecodeError` on corrupt
+state.
+- `OllamaInterface.session` creates `aiohttp.ClientSession()` outside an async
+context.
+- `OpenAIChat.chat()` does not handle an empty `response.choices` list.
+- `recall_journal_vector()` sets `_score` to raw cosine similarity instead of
+the unified `sim × confidence × recency` formula used by other recall
+methods.
+- Contradictions store fact IDs in `source_episodes_json`; rename or document
+this overload.
+- `Reflector` duplicates decay/config parameters instead of accepting a
+`MemoryConfig`.
+- `embedding_model` column is missing from initial `CREATE TABLE`
+statements and added only via `ALTER TABLE` in `_migrate()`.
+- `consolidate_journal()` commits once per merge instead of batching.
+- `search_journal()` and `search_episodes_by_keyword()` load 500 rows then
+filter in Python instead of using SQL `LIKE`.
+- `store.py` is ~1,800 lines; consider splitting into focused modules.
+- README "No-LLM Mode" example uses `await` outside an async function.
+- `run_gc()` docstring references a stale `ingrid-db-backup.sh` script.
+- `sentence_transformers` adapter uses deprecated `asyncio.get_event_loop()`.
+- `MemoryStore` lacks `__enter__` / `__exit__` context manager support.
+- MCP server has no shutdown cleanup for store, embedder, or sessions.
+- `_normalize()` only strips trailing periods, not other punctuation.
+- `recall()`, `recent()`, etc. do not validate `limit`; negative values
+return all rows in SQLite.
+- `_dedupe_jaccard()` returns a `frozenset` where the `_Candidate` type expects
+a string.
+- `gc.py run_gc()` wrapper ignores `MemoryConfig` values and uses its own
+hardcoded defaults.
+
+## Notes
+
+- MF-001, MF-002, and MF-008 are bug fixes that should land before any V2
+  architecture work. MF-008 is critical and blocks contradiction detection.
 - MF-003 is an API design issue that affects every consumer.
 - MF-004 is the decay thesis extended to contradictions — it's core, not creep.
 - MF-005 is a consistency gap, low priority.
+- MF-009 is the decay thesis extended to episodes — also core, not creep.
 - All items should be verified against Ingrid and Nano as testbeds before release.
 
 ---
@@ -256,7 +431,33 @@ resource. Keep it lightweight and optional.
 
 **Why core:** operational visibility; no new dependencies.
 
-### MV2-007: Temporal gap markers
+### MV2-007: Layer-aware configurable decay
+**Priority:** Medium
+**Source:** OpenClaw onboarding review, July 2026
+
+The recency term in `vectors.py` uses a single hard-coded decay constant
+for all memory layers. Over time this flattens episodic detail and
+long-term identity facts into the same forgetting curve, and it lets a
+low-confidence new fact outrank a high-confidence old fact simply because
+it is recent.
+
+**Fix:** Move decay parameters into `MemoryConfig` and make
+`recency_weight()` layer-aware:
+
+- `fact_decay_halflife` — slow (default ~1 year) for identity-grade facts.
+- `episode_decay_halflife` — fast (default ~7 days) for transient events.
+- `journal_decay_halflife` — medium (default ~30 days) for inferred
+  beliefs.
+- `confidence_decay_floor` — above this threshold, decay is slowed so
+  high-confidence truths do not erode as quickly.
+
+Keep the existing `relevance × confidence × recency` formula; only expose
+the decay constants and add the confidence floor. This is a tuning change,
+not a new dependency.
+
+**Why core:** refines the existing Decay layer; no new dependencies.
+
+### MV2-008: Temporal gap markers
 **Priority:** Low
 
 From Mastra's Observational Memory: insert a lightweight marker when a
@@ -278,7 +479,7 @@ when the query has temporal cues.
 
 **Why core:** extends the Episodes layer; no new dependencies.
 
-### MV2-008: Journal as belief/opinion network
+### MV2-009: Journal as belief/opinion network
 **Priority:** Medium
 
 From Hindsight's four-network model: treat the journal layer less as a
