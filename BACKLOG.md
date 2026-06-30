@@ -102,6 +102,35 @@ not address heavy maintenance on the hot path.
 This keeps lightweight pruning on the hot path and moves the expensive
 file-rebuild operation off it.
 
+### MF-007: Weighted containment in `store_fact`
+**Priority:** High  
+**Source:** OpenClaw onboarding review, July 2026
+
+The second deduplication layer in `store_fact` uses simple substring
+containment: if one fact's content is contained in another, the shorter one is
+discarded. This conflates string length with semantic value and causes two
+failure modes:
+
+1. **Nuance erasure:** a general truth ("The system is stable.") gets swallowed
+   by a conditional version ("The system is stable during peak loads."), even
+   though both are worth keeping.
+2. **Noise absorption:** a concise, high-confidence fact is discarded because
+   it is a substring of a longer, noisier fact full of filler or citations.
+
+**Fix:** Replace blind containment with weighted containment. First
+iteration:
+
+- Compute the set of non-stop-word tokens in the symmetric difference between
+  the two facts.
+- If the extra tokens contain meaningful nouns, verbs, or modifiers, skip
+  containment and let the semantic-merge layer (cosine similarity) decide.
+- If the confidence difference is large, prefer the higher-confidence fact as
+  the retained "core" truth rather than always keeping the longer one.
+
+This keeps the fix zero-dependency and surgical. A future iteration may add
+`core_fact` / `detailed_fact` metadata, but that is out of scope for the first
+pass.
+
 ## Notes
 
 - MF-001 and MF-002 are bug fixes that should land before any V2 architecture work.
