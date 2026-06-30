@@ -81,6 +81,27 @@ automatically for facts. Contradictions with embeddings should get the same
 treatment. If contradiction embeddings become stale after a model swap, they
 should be backfilled, not left as orphaned vectors.
 
+### MF-006: Separate GC pruning from VACUUM
+**Priority:** Medium  
+**Source:** Ingrid backend audit / OpenClaw code review, July 2026
+
+`MemoryStore.run_gc()` currently both deletes stale rows and runs `VACUUM`
+inside the same critical section. Even with WAL and `busy_timeout`, `VACUUM`
+needs an exclusive database lock to rebuild the file and can stall active MCP
+turns long enough to time out. MF-002 fixes routine writer contention but does
+not address heavy maintenance on the hot path.
+
+**Fix:** Split `run_gc()` into two operations:
+
+- `run_gc()` — prune superseded facts, journal, runs, metrics, and reflected
+  queue entries. Safe to run on a schedule.
+- `run_vacuum()` — reclaim disk space via `VACUUM`. Expose as a separate
+  maintenance-mode operation and only run it when the store is idle (no
+  active MCP turn for N seconds) or via explicit CLI invocation.
+
+This keeps lightweight pruning on the hot path and moves the expensive
+file-rebuild operation off it.
+
 ## Notes
 
 - MF-001 and MF-002 are bug fixes that should land before any V2 architecture work.
