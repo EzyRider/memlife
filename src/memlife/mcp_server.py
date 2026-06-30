@@ -15,6 +15,8 @@ Tools exposed:
     memory_revise       — Revise an existing fact
     memory_expire       — Mark a fact as expired
     memory_recall       — Track which facts were used
+    memory_gc           — Run garbage collection
+    memory_reflect      — Run reflection pass (synthesise episodes into journal)
 
 Resources:
     memlife://stats     — Memory statistics
@@ -61,6 +63,8 @@ def create_server(
     embedder_type: str = "dummy",
     embedding_model: str = "dummy",
     base_url: str = "http://localhost:11434",
+    chat_model: str = "qwen3.5:cloud",
+    critic_model: str = "deepseek-v4-flash:cloud",
 ):
     """Create and configure a FastMCP server with memlife tools.
 
@@ -74,6 +78,40 @@ def create_server(
     )
     embedder = _make_embedder(embedder_type, embedding_model, base_url)
     store = MemoryStore(config=config, embedder=embedder)
+
+    # Lazy-init: Reflector and chat adapter created on first reflect() call.
+    _reflector = None
+    _chat_adapter = None
+
+    async def _get_reflector():
+        """Lazily create a persistent Reflector with an Ollama chat adapter.
+
+        The Reflector is created once and reused across calls so that
+        _last_contradiction_scan persists between reflection passes (see
+        MF-003 in BACKLOG.md). Created lazily so the server doesn't need
+        an LLM endpoint just to start up — only when reflection is called.
+        """
+        nonlocal _reflector, _chat_adapter
+        if _reflector is None:
+            from memlife.adapters.ollama import OllamaChat
+            from memlife.reflection import Reflector
+
+            _chat_adapter = OllamaChat(
+                base_url=base_url,
+                model=chat_model,
+                fallback_models=[critic_model],
+            )
+
+            # Reflector calls model_chat.chat(messages, model) — OllamaChat
+            # implements that directly. No wrapper needed.
+            _reflector = Reflector(
+                memory=store,
+                model_chat=_chat_adapter,
+                critic=True,
+                critic_model=critic_model,
+            )
+            _reflector.model_name = chat_model
+        return _reflector
 
     mcp = FastMCP("memlife")
 
@@ -219,6 +257,36 @@ def create_server(
             f"DB: {result['db_size_before_mb']}MB -> {result['db_size_after_mb']}MB"
         )
 
+    @mcp.tool()
+    async def memory_reflect(max_episodes: int = 50) -> str:
+        """Run a reflection pass — synthesise pending episodes into journal
+        entries, detect contradictions, and apply confidence decay.
+
+        This is the lifecycle engine. Without reflection, episodes never
+        become journal entries, confidence never decays, and contradictions
+        go undetected. Run periodically (e.g. daily via cron).
+
+        Args:
+            max_episodes: Max episodes to reflect on per pass (default 50).
+        """
+        try:
+            reflector = await _get_reflector()
+            result = await reflector.reflect(max_episodes=max_episodes)
+        except Exception as e:
+            logger.error("Reflection failed: %s", e, exc_info=True)
+            return f"Reflection failed: {e}"
+
+        parts = [
+            f"Reflection complete.",
+            f"  Episodes reflected: {len(result.episode_ids)}",
+            f"  Observations kept:  {len(result.observations)}",
+            f"  Hypotheses kept:    {len(result.hypotheses)}",
+            f"  Revisions kept:     {len(result.revisions)}",
+            f"  Contradictions:     {len(result.contradictions)}",
+            f"  Dropped by critic:  {len(result.dropped)}",
+        ]
+        return "\n".join(parts)
+
     # ── Resources ──────────────────────────────────────────────────
 
     @mcp.resource("memlife://stats")
@@ -251,6 +319,7 @@ def create_server(
     # Store reference for cleanup
     mcp._memlife_store = store
     mcp._memlife_embedder = embedder
+    mcp._memlife_get_reflector = _get_reflector
 
     return mcp
 
@@ -278,6 +347,14 @@ def main():
         help="Ollama base URL (default: http://localhost:11434)",
     )
     parser.add_argument(
+        "--chat-model", default=os.getenv("MEMLIFE_CHAT_MODEL", "qwen3.5:cloud"),
+        help="Ollama model for reflection synthesis (default: qwen3.5:cloud)",
+    )
+    parser.add_argument(
+        "--critic-model", default=os.getenv("MEMLIFE_CRITIC_MODEL", "deepseek-v4-flash:cloud"),
+        help="Ollama model for reflection critic pass (default: deepseek-v4-flash:cloud)",
+    )
+    parser.add_argument(
         "--log-level", default=os.getenv("MEMLIFE_LOG_LEVEL", "INFO"),
         help="Log level (default: INFO)",
     )
@@ -290,6 +367,8 @@ def main():
         embedder_type=args.embedder,
         embedding_model=args.embedding_model,
         base_url=args.ollama_url,
+        chat_model=args.chat_model,
+        critic_model=args.critic_model,
     )
 
     logger.info(
