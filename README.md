@@ -65,7 +65,7 @@ async def main():
 asyncio.run(main())
 ```
 
-No Ollama, no OpenAI, no API key. The DummyEmbedder uses hash-based vectors. The full lifecycle — store, retrieve, decay, GC — works without any LLM.
+No Ollama, no OpenAI, no API key. The DummyEmbedder uses bag-of-words vectors — similar sentences get positive cosine similarity. The full lifecycle — store, retrieve, decay, GC — works without any LLM.
 
 ## The Lifecycle
 
@@ -115,15 +115,20 @@ context = asyncio.run(store.retrieve("something"))
 ## With an Embedder
 
 ```python
+import asyncio
 from memlife import MemoryStore, MemoryConfig
 from memlife.adapters.ollama import OllamaEmbedder
 
-store = MemoryStore(
-    config=MemoryConfig(db_path="./mem.db", embedding_model="mxbai-embed-large:latest"),
-    embedder=OllamaEmbedder(model="mxbai-embed-large:latest"),
-)
-await store.store_fact("User prefers dark mode", confidence=0.9)
-context = await store.retrieve("dark mode")
+async def main():
+    store = MemoryStore(
+        config=MemoryConfig(db_path="./mem.db", embedding_model="mxbai-embed-large:latest"),
+        embedder=OllamaEmbedder(model="mxbai-embed-large:latest"),
+    )
+    await store.store_fact("User prefers dark mode", confidence=0.9)
+    context = await store.retrieve("dark mode")
+    store.close()
+
+asyncio.run(main())
 ```
 
 Also available: `OpenAIEmbedder` (`pip install memlife[openai]`) and `STEmbedder` for local Sentence Transformers (`pip install memlife[sentence-transformers]`).
@@ -131,18 +136,23 @@ Also available: `OpenAIEmbedder` (`pip install memlife[openai]`) and `STEmbedder
 ## With Reflection
 
 ```python
+import asyncio
 from memlife import MemoryStore, MemoryConfig, Reflector, DummyEmbedder, DummyChat
 
-store = MemoryStore(
-    config=MemoryConfig(db_path="./mem.db", embedding_model="dummy"),
-    embedder=DummyEmbedder(),
-)
-reflector = Reflector(
-    memory=store,
-    model_chat=DummyChat(),
-    critic=False,
-)
-result = await reflector.reflect()
+async def main():
+    store = MemoryStore(
+        config=MemoryConfig(db_path="./mem.db", embedding_model="dummy"),
+        embedder=DummyEmbedder(),
+    )
+    reflector = Reflector(
+        memory=store,
+        model_chat=DummyChat(),
+        critic=False,
+    )
+    result = await reflector.reflect()
+    store.close()
+
+asyncio.run(main())
 ```
 
 For real LLMs, use an adapter:
@@ -150,8 +160,9 @@ For real LLMs, use an adapter:
 ```python
 from memlife.adapters.ollama import OllamaChat
 
-chat = OllamaChat(model="qwen3.5:cloud")
-reflector = Reflector(memory=store, model_chat=chat)
+# Provide your own model name — memlife doesn't ship deployment-specific defaults.
+chat = OllamaChat(model="your-model-name")
+reflector = Reflector(memory=store, model_chat=chat, agent_name="my-agent")
 ```
 
 ## Sync API
@@ -224,7 +235,7 @@ Claude Desktop config:
 - **Unified scoring:** relevance × confidence × recency across all layers
 - **Confidence ceiling (0.99):** facts are never immutable
 - **Confidence decay:** 30-day halflife, floored at 0.15 — journal entries fade
-- **GC with configurable retention:** 90 days for superseded facts, 60 for runs, 30 for metrics
+- **GC with configurable retention:** 90 days for superseded facts, 180 for episodes, 60 for runs, 30 for metrics
 - **Embedding versioning:** detect stale vectors when the model changes, backfill automatically
 - **Episode tool index:** search "have I used this tool before?"
 - **Incremental contradiction detection:** O(new × n), not O(n²)
@@ -256,7 +267,7 @@ memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pre
 
 ## Status
 
-**v0.3.0-beta.** The API may change before v1.0. Not recommended for production yet.
+**v0.3.4-beta.** The API may change before v1.0. Not recommended for production yet.
 
 ## License
 

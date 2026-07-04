@@ -64,6 +64,13 @@ Option 1 is the most memlife-idiomatic — the caller owns persistence, the
 Reflector owns logic. Aligns with the existing pattern where MemoryStore
 persists everything else.
 
+**Status:** Patched in Ingrid backend (`ingrid/journal/reflection.py`):
+`Reflector` is now stateless. `reflect()` accepts and returns
+`last_contradiction_scan` and `reflection_cycle`; `IngridAgent` persists these
+watermarks across passes. Existing tests updated to simulate caller
+persistence, plus a new statelessness test. Full suite green (216 passed).
+Pending upstreaming into the standalone memlife package.
+
 ## Features (core to decay thesis, not feature creep)
 
 ### MF-004: Contradiction retirement policy
