@@ -1628,12 +1628,30 @@ class MemoryStore:
 
         # Journal entries without embeddings (skip contradictions — they're
         # not retrieved, so embedding them is wasted work) or with stale model.
-        j_rows = self.conn.execute(
-            f"SELECT id, content FROM journal "
-            f"WHERE (embedding_json = ''{model_clause}) "
-            f"AND content != '' AND type != 'contradiction'",
-            model_params,
-        ).fetchall()
+        # MF-005: contradictions with existing but stale embeddings ARE
+        # backfilled so they don't become orphaned vectors after a model swap.
+        # Only contradictions with NO embedding are skipped.
+        if self.embedding_model_name:
+            j_rows = self.conn.execute(
+                f"SELECT id, content FROM journal "
+                f"WHERE (embedding_json = ''{model_clause}) "
+                f"AND content != '' AND type != 'contradiction'",
+                model_params,
+            ).fetchall()
+            # Contradictions: only backfill stale-model ones, not missing.
+            j_contradiction_rows = self.conn.execute(
+                "SELECT id, content FROM journal "
+                "WHERE embedding_json != '' AND embedding_model != ? "
+                "AND content != '' AND type = 'contradiction'",
+                [self.embedding_model_name],
+            ).fetchall()
+            j_rows = j_rows + j_contradiction_rows
+        else:
+            j_rows = self.conn.execute(
+                "SELECT id, content FROM journal "
+                "WHERE embedding_json = '' "
+                "AND content != '' AND type != 'contradiction'",
+            ).fetchall()
         for i in range(0, len(j_rows), batch_size):
             batch = j_rows[i:i + batch_size]
             texts = [r[1] for r in batch]
