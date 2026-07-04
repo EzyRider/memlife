@@ -384,7 +384,9 @@ class MemoryStore:
             self.conn.commit()
 
     def _tokenize(self, query: str) -> list[str]:
-        return [t for t in re.findall(r"[A-Za-z0-9_]+", query.lower()) if len(t) >= 3]
+        # MF-013: was len >= 3, which dropped important short terms like
+        # "AI", "ML", "Go", "C", "OS", "Py". Lowered to 2.
+        return [t for t in re.findall(r"[A-Za-z0-9_]+", query.lower()) if len(t) >= 2]
 
     def recall(self, query: str, limit: int = 5) -> list[Episode]:
         """Tokenised keyword recall over task and summary, ranked by match count
@@ -606,12 +608,35 @@ class MemoryStore:
 
         active = self._active_facts()
 
-        # Layer 2: containment — keep the longer (more specific) content.
+        # Layer 2: weighted containment — keep the longer (more specific)
+        # content, but only when the shorter content doesn't add meaningful
+        # tokens the longer one lacks. MF-007: blind substring containment
+        # conflated string length with semantic value, erasing nuanced facts.
         for f in active:
             ex = f.content.strip().lower()
             if not ex or ex == new_lower:
                 continue
             if ex in new_lower or new_lower in ex:
+                # Compute non-stop-word tokens in the symmetric difference.
+                shorter = ex if len(ex) < len(new_lower) else new_lower
+                longer = new_lower if len(ex) < len(new_lower) else ex
+                shorter_tokens = set(re.findall(r"[a-z0-9_]+", shorter))
+                longer_tokens = set(re.findall(r"[a-z0-9_]+", longer))
+                extra = shorter_tokens - longer_tokens
+                _STOP = {"the","a","an","is","are","was","were","be","been",
+                         "of","in","on","at","to","for","and","or","but",
+                         "not","it","this","that","with","from","by","as"}
+                meaningful_extra = extra - _STOP
+                # If the shorter fact has meaningful tokens the longer one
+                # lacks, skip containment and let the semantic-merge layer
+                # (cosine similarity) decide.
+                if meaningful_extra:
+                    continue
+                # Confidence tie-break: if the shorter fact has much higher
+                # confidence, prefer it as the retained core truth.
+                if confidence > f.confidence + 0.15:
+                    return await self._supersede_fact(
+                        f.id, content, source, confidence, embedding_json)
                 if len(f.content) >= len(content):
                     self._refresh_fact(f.id, confidence)
                     return f.id
@@ -1766,6 +1791,7 @@ class MemoryStore:
         completed_runs_days: int = 60,
         metrics_days: int = 30,
         reflected_queue_days: int = 30,
+        episodes_days: int = 180,
     ) -> dict:
         """Run garbage collection on old/superseded data.
 
@@ -1843,10 +1869,37 @@ class MemoryStore:
         )
         pruned["reflected_queue"] = cur.rowcount
 
+        # Old episodes and their tool index entries (MF-009).
+        cutoff_episodes = now - (episodes_days * 86400)
+        cur = self.conn.execute(
+            "DELETE FROM episodes WHERE created_at < ?",
+            (cutoff_episodes,),
+        )
+        pruned["episodes"] = cur.rowcount
+        self.conn.execute(
+            "DELETE FROM episode_tools WHERE episode_id NOT IN "
+            "(SELECT id FROM episodes)"
+        )
+        pruned["episode_tools"] = cur.rowcount
+
         self.conn.commit()
 
-        # Reclaim space — VACUUM rebuilds the file. This is the one
-        # operation that actually shrinks the file on disk.
+        # MF-006: VACUUM is now a separate method — it needs an exclusive
+        # lock and can stall active MCP turns. Callers should use
+        # run_vacuum() separately when the store is idle.
+        pruned["total_pruned"] = sum(
+            v for k, v in pruned.items()
+            if isinstance(v, int) and k not in ("db_size_before_mb", "db_size_after_mb")
+        )
+        return pruned
+
+    def run_vacuum(self) -> dict:
+        """Reclaim disk space by rebuilding the database file.
+
+        VACUUM needs an exclusive lock and can stall active operations.
+        Run this separately from run_gc(), ideally when the store is idle
+        or via explicit CLI invocation. MF-006.
+        """
         old_size = self.conn.execute(
             "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()"
         ).fetchone()[0]
@@ -1854,14 +1907,10 @@ class MemoryStore:
         new_size = self.conn.execute(
             "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()"
         ).fetchone()[0]
-
-        pruned["db_size_before_mb"] = round(old_size / 1024 / 1024, 1)
-        pruned["db_size_after_mb"] = round(new_size / 1024 / 1024, 1)
-        pruned["total_pruned"] = sum(
-            v for k, v in pruned.items()
-            if isinstance(v, int) and k not in ("db_size_before_mb", "db_size_after_mb")
-        )
-        return pruned
+        return {
+            "db_size_before_mb": round(old_size / 1024 / 1024, 1),
+            "db_size_after_mb": round(new_size / 1024 / 1024, 1),
+        }
 
     def get_metrics_summary(self) -> dict:
         """Return aggregate metrics across all reflections plus current unresolved contradictions."""

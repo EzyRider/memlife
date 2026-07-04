@@ -138,6 +138,10 @@ This keeps the fix zero-dependency and surgical. A future iteration may add
 `core_fact` / `detailed_fact` metadata, but that is out of scope for the first
 pass.
 
+**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`,
+`ingrid/config.py`, `ingrid/agent.py`); full test suite green (214 passed).
+Pending upstreaming into the standalone memlife package.
+
 ## Notes
 
 ### MF-008: `fact_conflict_threshold` not initialized in `MemoryStore.__init__`
@@ -183,6 +187,10 @@ self.conn.execute(
     "DELETE FROM episode_tools WHERE episode_id NOT IN "
     "(SELECT id FROM episodes)")
 ```
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`,
+`ingrid/config.py`, `ingrid/agent.py`); full test suite green (210 passed).
+Pending upstreaming into the standalone memlife package.
 
 ### MF-010: Hardcoded "Ingrid" agent name in Reflector prompt
 **Priority:** Medium

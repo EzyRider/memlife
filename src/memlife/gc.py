@@ -13,6 +13,7 @@ def run_gc(
     completed_runs_days: int = 60,
     metrics_days: int = 30,
     reflected_queue_days: int = 30,
+    episodes_days: int = 180,
 ) -> dict:
     """Run garbage collection on old/superseded data.
 
@@ -25,4 +26,5 @@ def run_gc(
         completed_runs_days=completed_runs_days,
         metrics_days=metrics_days,
         reflected_queue_days=reflected_queue_days,
+        episodes_days=episodes_days,
     )

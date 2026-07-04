@@ -60,7 +60,7 @@ class Reflector:
         model_chat,
         *,
         critic: bool = True,
-        critic_model: str = "deepseek-v4-flash:cloud",
+        critic_model: str = "",  # MF-011: caller must provide
         decay_halflife_days: float = 30.0,
         decay_floor: float = 0.15,
         fact_merge_threshold: float = 0.90,
@@ -68,6 +68,7 @@ class Reflector:
         timeout: float = 120.0,
         total_timeout: float = 300.0,
         contradiction_retirement_cycles: int = 14,
+        agent_name: str = "the agent",
     ):
         """
         ``model_chat`` is an awaitable with the signature
@@ -91,9 +92,9 @@ class Reflector:
         """
         self.memory = memory
         self.model_chat = model_chat
-        self.model_name = "qwen3.5:cloud"
+        self.model_name = ""  # MF-011: was "qwen3.5:cloud" — deployment-specific
         self.critic = critic
-        self.critic_model = critic_model
+        self.critic_model = critic_model  # MF-011: caller must provide
         self.decay_halflife_days = decay_halflife_days
         self.decay_floor = decay_floor
         self.fact_merge_threshold = fact_merge_threshold
@@ -104,6 +105,12 @@ class Reflector:
         # all-pairs scan is performed. Subsequent runs only compare new/updated
         # facts (created_at or updated_at >= this timestamp) against the full
         # active set — O(new × total) instead of O(total²).
+        #
+        # MF-003: Reflector is designed to be created once and reused across
+        # reflection passes. Recreating it resets this to 0.0, disabling
+        # incremental scanning and forcing a full O(n²) scan every pass.
+        # Callers that must recreate the Reflector should save and restore
+        # `reflector.last_contradiction_scan` to preserve incremental scanning.
         self._last_contradiction_scan: float = 0.0
         # Reflection pass counter for contradiction retirement. Incremented
         # each time reflect() completes a full pass; used to track how many
@@ -112,6 +119,22 @@ class Reflector:
         # Retire active contradictions not re-detected in this many reflection
         # passes. 0 disables retirement.
         self.contradiction_retirement_cycles: int = contradiction_retirement_cycles
+        # MF-010: agent name for the reflection prompt — was hardcoded "Ingrid".
+        self.agent_name: str = agent_name
+
+    @property
+    def last_contradiction_scan(self) -> float:
+        """Timestamp of the last contradiction scan (MF-003).
+
+        Callers that recreate the Reflector each pass should save this value
+        and pass it to the new instance via the constructor or restore it
+        after construction to preserve incremental scanning.
+        """
+        return self._last_contradiction_scan
+
+    @last_contradiction_scan.setter
+    def last_contradiction_scan(self, value: float) -> None:
+        self._last_contradiction_scan = value
 
     async def reflect(self, since: float | None = None, max_episodes: int = 50) -> ReflectionResult:
         """Reflect on episodes since ``since`` (epoch seconds).
@@ -303,7 +326,7 @@ class Reflector:
             hist_lines += f"Older journal entries:\n{hist_j}\n\n"
 
         system = (
-            "You are Ingrid's reflective faculty. Review today's episodes and "
+            f"You are {self.agent_name}'s reflective faculty. Review today's episodes and "
             "your prior journal, then write private entries that update your "
             "model of the user and the work.\n\n"
             "Rules:\n"
@@ -705,7 +728,10 @@ class Reflector:
             for t in tokens:
                 token_freq[t] = token_freq.get(t, 0) + 1
 
-        threshold = max(2, len(facts) * 0.3)
+        # MF-015: was max(2, len(facts) * 0.3) — too aggressive for small
+        # fact sets. For 3 facts, threshold was 2, so any term in all 3 was
+        # "common" and filtered out, missing real contradictions.
+        threshold = max(3, len(facts) * 0.5)
         common = {t for t, c in token_freq.items() if c > threshold}
 
         seen: list[dict] = []

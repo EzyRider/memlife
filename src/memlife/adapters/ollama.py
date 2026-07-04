@@ -12,7 +12,7 @@ Usage:
     )
     chat = OllamaChat(
         base_url="http://localhost:11434",
-        model="kimi-k2.7-code:cloud",
+        model="your-model-name",
     )
 
     store = MemoryStore(config=config, embedder=embedder)
@@ -100,7 +100,7 @@ class OllamaChat:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen3.5:cloud",
+        model: str = "",  # MF-011: caller must provide — no deployment-specific default
         fallback_models: list[str] | None = None,
         *,
         temperature: float = 0.7,

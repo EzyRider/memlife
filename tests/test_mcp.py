@@ -114,7 +114,9 @@ def test_memory_gc_tool(server):
     store = server._memlife_store
     result = store.run_gc()
     assert "total_pruned" in result
-    assert "db_size_before_mb" in result
+    # MF-006: VACUUM is now a separate method — run_gc no longer returns
+    # disk size. That's in run_vacuum() instead.
+    assert "episodes" in result  # MF-009: episode pruning now included
 
 
 def test_stats_resource(server):

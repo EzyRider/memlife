@@ -66,6 +66,7 @@ class MemoryConfig:
     gc_completed_runs_days: int = 60
     gc_metrics_days: int = 30
     gc_reflected_queue_days: int = 30
+    gc_episodes_days: int = 180  # MF-009: episodes were never pruned
 
     @classmethod
     def from_env(cls) -> "MemoryConfig":
@@ -109,4 +110,5 @@ class MemoryConfig:
             gc_completed_runs_days=int(os.getenv("MEMLIFE_GC_COMPLETED_RUNS_DAYS", "60")),
             gc_metrics_days=int(os.getenv("MEMLIFE_GC_METRICS_DAYS", "30")),
             gc_reflected_queue_days=int(os.getenv("MEMLIFE_GC_REFLECTED_QUEUE_DAYS", "30")),
+            gc_episodes_days=int(os.getenv("MEMLIFE_GC_EPISODES_DAYS", "180")),
         )

@@ -76,6 +76,20 @@ def import_jsonl(store: MemoryStore, path: str) -> dict:
     Each line is a JSON object with 'table' and 'data' fields.
     Rows are inserted with INSERT OR IGNORE to avoid duplicates.
     """
+    # MF-012: whitelist allowed columns per table to prevent SQL injection
+    # via crafted column names in JSONL keys.
+    _ALLOWED_COLUMNS: dict[str, set[str]] = {
+        "episodes": {"id", "task", "outcome", "summary", "tool_calls_json",
+                      "created_at", "embedding_json", "embedding_model"},
+        "facts": {"id", "content", "source", "confidence", "embedding_json",
+                  "embedding_model", "created_at", "updated_at", "superseded_by"},
+        "journal": {"id", "type", "content", "confidence", "source_episodes_json",
+                    "private", "created_at", "superseded_by", "embedding_json",
+                    "embedding_model", "last_detected"},
+        "sessions": {"id", "name", "created_at", "updated_at", "model_used",
+                      "conversation_json", "rolling_summary"},
+    }
+
     counts = {"episodes": 0, "facts": 0, "journal": 0, "sessions": 0}
 
     with open(path) as f:
@@ -87,38 +101,22 @@ def import_jsonl(store: MemoryStore, path: str) -> dict:
             table = obj["table"]
             data = obj["data"]
 
-            if table == "episodes":
-                cols = ", ".join(data.keys())
-                placeholders = ", ".join("?" * len(data))
-                store.conn.execute(
-                    f"INSERT OR IGNORE INTO episodes ({cols}) VALUES ({placeholders})",
-                    list(data.values()),
-                )
-                counts["episodes"] += 1
-            elif table == "facts":
-                cols = ", ".join(data.keys())
-                placeholders = ", ".join("?" * len(data))
-                store.conn.execute(
-                    f"INSERT OR IGNORE INTO facts ({cols}) VALUES ({placeholders})",
-                    list(data.values()),
-                )
-                counts["facts"] += 1
-            elif table == "journal":
-                cols = ", ".join(data.keys())
-                placeholders = ", ".join("?" * len(data))
-                store.conn.execute(
-                    f"INSERT OR IGNORE INTO journal ({cols}) VALUES ({placeholders})",
-                    list(data.values()),
-                )
-                counts["journal"] += 1
-            elif table == "sessions":
-                cols = ", ".join(data.keys())
-                placeholders = ", ".join("?" * len(data))
-                store.conn.execute(
-                    f"INSERT OR IGNORE INTO sessions ({cols}) VALUES ({placeholders})",
-                    list(data.values()),
-                )
-                counts["sessions"] += 1
+            if table not in _ALLOWED_COLUMNS:
+                continue
+
+            allowed = _ALLOWED_COLUMNS[table]
+            # Filter to whitelisted columns only; reject unknown keys.
+            safe_data = {k: v for k, v in data.items() if k in allowed}
+            if not safe_data:
+                continue
+
+            cols = ", ".join(safe_data.keys())
+            placeholders = ", ".join("?" * len(safe_data))
+            store.conn.execute(
+                f"INSERT OR IGNORE INTO {table} ({cols}) VALUES ({placeholders})",
+                list(safe_data.values()),
+            )
+            counts[table] += 1
 
     store.conn.commit()
     counts["total"] = sum(counts.values())
