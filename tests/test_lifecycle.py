@@ -79,6 +79,7 @@ async def test_full_lifecycle(store, config):
         memory=store,
         model_chat=DummyChat(),
         critic=False,  # DummyChat doesn't produce critic-ready output
+        model_name="test",
     )
     result = await reflector.reflect()
     assert len(result.episode_ids) >= 1

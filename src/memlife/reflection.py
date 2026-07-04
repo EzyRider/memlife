@@ -69,6 +69,7 @@ class Reflector:
         total_timeout: float = 300.0,
         contradiction_retirement_cycles: int = 14,
         agent_name: str = "the agent",
+        model_name: str = "",
     ):
         """
         ``model_chat`` is an awaitable with the signature
@@ -92,7 +93,7 @@ class Reflector:
         """
         self.memory = memory
         self.model_chat = model_chat
-        self.model_name = ""  # MF-011: was "qwen3.5:cloud" — deployment-specific
+        self.model_name = model_name  # MF-011: caller must provide
         self.critic = critic
         self.critic_model = critic_model  # MF-011: caller must provide
         self.decay_halflife_days = decay_halflife_days
@@ -168,6 +169,15 @@ class Reflector:
         if not episodes:
             logger.info("Reflection: no new episodes to reflect on.")
             return ReflectionResult()
+
+        # Guard: model_name must be set before the model call. DummyChat
+        # ignores it, but real adapters need a valid model identifier.
+        if not self.model_name:
+            raise ValueError(
+                "Reflector.model_name is empty. Set it via the constructor "
+                "or by assigning reflector.model_name = 'your-model' before "
+                "calling reflect()."
+            )
 
         ep_ids = [e.id for e in episodes]
         prior_journal = self.memory.journal_recent(limit=10)

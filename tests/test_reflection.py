@@ -16,6 +16,7 @@ async def test_reflection_creates_journal(store, config):
         memory=store,
         model_chat=DummyChat(),
         critic=False,
+        model_name="test",
     )
     result = await reflector.reflect()
     assert len(result.episode_ids) >= 1
@@ -51,6 +52,7 @@ async def test_reflection_timeout_handling(store, config):
         critic=False,
         timeout=0.1,
         total_timeout=0.2,
+        model_name="test",
     )
     result = await reflector.reflect()
     # Should return with episode IDs but no stored entries
@@ -83,6 +85,7 @@ async def test_critic_failure_falls_back(store, config):
         model_chat=FailingCriticChat(),
         critic=True,
         critic_model="test-model",
+        model_name="test",
     )
     result = await reflector.reflect()
     # Observation should be kept despite critic failure
@@ -99,6 +102,7 @@ async def test_reflection_marks_episodes_reflected(store, config):
         memory=store,
         model_chat=DummyChat(),
         critic=False,
+        model_name="test",
     )
     await reflector.reflect()
     pending = store.pending_reflections()

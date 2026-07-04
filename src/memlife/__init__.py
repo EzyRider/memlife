@@ -24,7 +24,7 @@ from memlife.store import MemoryStore
 from memlife.sync_store import SyncMemoryStore
 from memlife.vectors import cosine, recency_weight
 
-__version__ = "0.3.0b0"
+__version__ = "0.3.7b0"
 
 __all__ = [
     "MemoryStore",
