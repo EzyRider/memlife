@@ -70,6 +70,11 @@ class MemoryStore:
         # tests construct MemoryStore directly so this default is the source of
         # truth when unwired. See Config.fact_merge_threshold / fact_conflict_threshold.
         self.fact_merge_threshold: float = 0.90
+        # Cosine above which two facts are treated as a candidate contradiction
+        # (flagged in reflection, not auto-merged). Set from Config by the agent;
+        # same default-sourcing pattern as fact_merge_threshold above.
+        # MF-008: was missing — check_conflicts() raised AttributeError.
+        self.fact_conflict_threshold: float = 0.75
         # Consecutive embedding failure counter — resets on success, escalates
         # logging at 5+. Exposed in embedding_health() for /stats.
         self._embed_failures: int = 0
@@ -86,7 +91,12 @@ class MemoryStore:
                 if self._conn is None:
                     self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
                     self._conn.row_factory = sqlite3.Row
-                    self._conn.execute("PRAGMA journal_mode=WAL")
+                    self._conn.execute(
+                        f"PRAGMA journal_mode={self.config.sqlite_journal_mode}"
+                    )
+                    self._conn.execute(
+                        f"PRAGMA busy_timeout={self.config.sqlite_busy_timeout_ms}"
+                    )
                     self._init_schema()
                     self._migrate()
         return self._conn
@@ -135,7 +145,8 @@ class MemoryStore:
                 private INTEGER DEFAULT 1,
                 created_at REAL NOT NULL,
                 superseded_by TEXT DEFAULT '',
-                embedding_json TEXT DEFAULT ''
+                embedding_json TEXT DEFAULT '',
+                last_detected INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_journal_type
                 ON journal(type);
@@ -199,6 +210,8 @@ class MemoryStore:
             self.conn.execute("ALTER TABLE journal ADD COLUMN superseded_by TEXT DEFAULT ''")
         if "embedding_json" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN embedding_json TEXT DEFAULT ''")
+        if "last_detected" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN last_detected INTEGER DEFAULT 0")
         rcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(agent_runs)")}
         if "trace_json" not in rcols:
             self.conn.execute("ALTER TABLE agent_runs ADD COLUMN trace_json TEXT DEFAULT '[]'")
@@ -988,17 +1001,18 @@ class MemoryStore:
     def add_journal_entry(
         self, type: str, content: str, confidence: float = 0.5,
         source_episodes: list[str] | None = None, private: bool = True,
+        last_detected: int = 0,
     ) -> str:
         """Store a journal entry. Returns its id. (Sync; embedding is a
         separate async step via :meth:`embed_journal_entry`.)"""
         jid = f"jrn_{uuid.uuid4().hex[:12]}"
         self.conn.execute(
             "INSERT INTO journal (id, type, content, confidence, "
-            "source_episodes_json, private, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "source_episodes_json, private, created_at, last_detected) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (jid, type, content, confidence,
              json.dumps(source_episodes or []),
-             1 if private else 0, time.time()),
+             1 if private else 0, time.time(), last_detected),
         )
         self.conn.commit()
         return jid
@@ -1139,12 +1153,117 @@ class MemoryStore:
         )
         self.conn.commit()
 
+    # ------------------------------------------------------------------
+    # Contradiction lifecycle — dedupe (MF-001) + retirement (MF-004)
+    # ------------------------------------------------------------------
+
+    def has_active_contradiction(self, fact_a: str, fact_b: str) -> bool:
+        """Return True if an active contradiction already covers this fact pair.
+
+        The pair is considered the same regardless of ordering.
+        """
+        row = self.conn.execute(
+            "SELECT 1 FROM journal "
+            "WHERE superseded_by = '' AND type = 'contradiction' "
+            "AND ("
+            "  (json_extract(source_episodes_json, '$[0]') = ? "
+            "   AND json_extract(source_episodes_json, '$[1]') = ?) "
+            " OR "
+            "  (json_extract(source_episodes_json, '$[0]') = ? "
+            "   AND json_extract(source_episodes_json, '$[1]') = ?)"
+            ") "
+            "LIMIT 1",
+            (fact_a, fact_b, fact_b, fact_a),
+        ).fetchone()
+        return row is not None
+
+    def touch_active_contradiction(
+        self, fact_a: str, fact_b: str, cycle: int
+    ) -> int:
+        """Update last_detected for an active contradiction covering this pair.
+
+        Returns the number of rows updated (0 or 1). The pair is considered
+        the same regardless of ordering.
+        """
+        cur = self.conn.execute(
+            "UPDATE journal SET last_detected = ? "
+            "WHERE superseded_by = '' AND type = 'contradiction' "
+            "AND ("
+            "  (json_extract(source_episodes_json, '$[0]') = ? "
+            "   AND json_extract(source_episodes_json, '$[1]') = ?) "
+            " OR "
+            "  (json_extract(source_episodes_json, '$[0]') = ? "
+            "   AND json_extract(source_episodes_json, '$[1]') = ?)"
+            ")",
+            (cycle, fact_a, fact_b, fact_b, fact_a),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def reinforce_unresolved_contradictions(self, current_cycle: int) -> int:
+        """Update last_detected for contradictions that are still unresolved.
+
+        A contradiction is unresolved if both source facts still resolve to
+        active, distinct facts. These tensions stay alive across reflection
+        passes and should not be retired just because they were first created
+        a while ago. Returns the number of contradictions reinforced.
+        """
+        rows = self.conn.execute(
+            "SELECT id, source_episodes_json FROM journal "
+            "WHERE superseded_by = '' AND type = 'contradiction'"
+        ).fetchall()
+        reinforced = 0
+        for jid, source_json in rows:
+            fact_ids: list[str] = []
+            try:
+                fact_ids = json.loads(source_json or "[]")
+            except json.JSONDecodeError:
+                continue
+            if len(fact_ids) != 2:
+                continue
+            a = self.resolve_fact(fact_ids[0])
+            b = self.resolve_fact(fact_ids[1])
+            if a is None or b is None or a.id == b.id:
+                continue
+            self.conn.execute(
+                "UPDATE journal SET last_detected = ? WHERE id = ?",
+                (current_cycle, jid),
+            )
+            reinforced += 1
+        self.conn.commit()
+        return reinforced
+
+    def retire_stale_contradictions(
+        self, current_cycle: int, retirement_cycles: int
+    ) -> list[str]:
+        """Retire active contradictions not seen in ``retirement_cycles`` passes.
+
+        Returns the IDs of contradictions retired in this pass. Retired entries
+        are marked with ``__retired__:stale-contradiction`` so they remain in
+        the table but are excluded from active retrieval.
+        """
+        if retirement_cycles <= 0:
+            return []
+        cutoff = current_cycle - retirement_cycles
+        rows = self.conn.execute(
+            "SELECT id FROM journal "
+            "WHERE superseded_by = '' AND type = 'contradiction' "
+            "AND last_detected <= ?",
+            (cutoff,),
+        ).fetchall()
+        retired_ids: list[str] = []
+        for (jid,) in rows:
+            self.retire_journal(jid, reason="stale-contradiction")
+            retired_ids.append(jid)
+        return retired_ids
+
     def _journal_from_row(self, r) -> JournalEntry:
         return JournalEntry(
             id=r[0], type=r[1], content=r[2], confidence=r[3],
             source_episodes_json=r[4] or "[]", private=bool(r[5]),
             created_at=r[6], superseded_by=r[7] or "",
             embedding_json=(r[8] or "") if len(r) > 8 else "",
+            last_detected=r[9] if len(r) > 9 else 0,
         )
 
     def _active_journal_sql(self, select: str, extra_where: str = "") -> str:
@@ -1158,7 +1277,8 @@ class MemoryStore:
         """Active contradiction journal entries, newest first."""
         rows = self.conn.execute(
             "SELECT id, type, content, confidence, source_episodes_json, "
-            "private, created_at, superseded_by, embedding_json FROM journal "
+            "private, created_at, superseded_by, embedding_json, last_detected "
+            "FROM journal "
             "WHERE superseded_by = '' AND type = 'contradiction' "
             "ORDER BY created_at DESC LIMIT ?",
             (limit,),

@@ -67,6 +67,7 @@ class Reflector:
         fact_conflict_threshold: float = 0.75,
         timeout: float = 120.0,
         total_timeout: float = 300.0,
+        contradiction_retirement_cycles: int = 14,
     ):
         """
         ``model_chat`` is an awaitable with the signature
@@ -104,6 +105,13 @@ class Reflector:
         # facts (created_at or updated_at >= this timestamp) against the full
         # active set — O(new × total) instead of O(total²).
         self._last_contradiction_scan: float = 0.0
+        # Reflection pass counter for contradiction retirement. Incremented
+        # each time reflect() completes a full pass; used to track how many
+        # reflection cycles ago a contradiction was last re-detected.
+        self._reflection_cycle: int = 0
+        # Retire active contradictions not re-detected in this many reflection
+        # passes. 0 disables retirement.
+        self.contradiction_retirement_cycles: int = contradiction_retirement_cycles
 
     async def reflect(self, since: float | None = None, max_episodes: int = 50) -> ReflectionResult:
         """Reflect on episodes since ``since`` (epoch seconds).
@@ -184,6 +192,21 @@ class Reflector:
         parsed = self._parse(raw, ep_ids)
         parsed.episode_ids = ep_ids
         parsed.contradictions = self._detect_contradictions()
+        self._reflection_cycle += 1
+
+        # Reinforce contradictions that are still unresolved before retiring
+        # stale ones. This keeps long-lived, real tensions active even if the
+        # original fact pair wasn't re-detected in the most recent pass.
+        reinforced = self.memory.reinforce_unresolved_contradictions(
+            self._reflection_cycle
+        )
+        retired = self.memory.retire_stale_contradictions(
+            self._reflection_cycle, self.contradiction_retirement_cycles
+        )
+        if reinforced:
+            logger.debug("Reinforced %d unresolved contradiction(s)", reinforced)
+        if retired:
+            logger.info("Retired %d stale contradiction(s)", len(retired))
 
         # Quality gate: drop entries the critic rejects.
         if self.critic and parsed.observations + parsed.hypotheses + parsed.revisions:
@@ -752,6 +775,16 @@ class Reflector:
         # layer excludes from injected context (see _active_journal_sql) — so
         # storing them records the tension without polluting turns.
         for c in result.contradictions:
+            if self.memory.has_active_contradiction(c["fact_a"], c["fact_b"]):
+                self.memory.touch_active_contradiction(
+                    c["fact_a"], c["fact_b"], self._reflection_cycle
+                )
+                logger.debug(
+                    "Re-detected contradiction '%s' ↔ '%s'; touched",
+                    c["content_a"],
+                    c["content_b"],
+                )
+                continue
             content = (
                 f"Possible contradiction between facts: "
                 f"'{c['content_a']}' ↔ '{c['content_b']}' "
@@ -762,6 +795,7 @@ class Reflector:
                 content,
                 confidence=0.6,
                 source_episodes=[c["fact_a"], c["fact_b"]],
+                last_detected=self._reflection_cycle,
             )
             await self.memory.embed_journal_entry(jid)
             logger.info(

@@ -91,6 +91,14 @@ class SyncMemoryStore:
     def fact_merge_threshold(self, value: float) -> None:
         self._store.fact_merge_threshold = value
 
+    @property
+    def fact_conflict_threshold(self) -> float:
+        return self._store.fact_conflict_threshold
+
+    @fact_conflict_threshold.setter
+    def fact_conflict_threshold(self, value: float) -> None:
+        self._store.fact_conflict_threshold = value
+
     # --- Sync passthrough methods ---
     def remember(self, task: str, outcome: str = "success",
                  summary: str = "", tool_calls: list[dict] | None = None) -> str:

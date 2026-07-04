@@ -92,6 +92,7 @@ class JournalEntry:
     created_at: float = field(default_factory=time.time)
     superseded_by: str = ""
     embedding_json: str = ""
+    last_detected: int = 0  # reflection cycle when last re-detected (contradictions)
 
     @property
     def source_episodes(self) -> list[str]:

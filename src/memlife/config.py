@@ -19,6 +19,11 @@ class MemoryConfig:
     # Database
     db_path: str = "./memlife.db"
 
+    # SQLite pragmas — WAL + busy_timeout protect against corruption under
+    # concurrent writers (MF-002). Both on by default, overridable via env.
+    sqlite_journal_mode: str = "WAL"
+    sqlite_busy_timeout_ms: int = 5000
+
     # Embedding model name (stored with each vector for versioning)
     embedding_model: str = ""
 
@@ -51,6 +56,10 @@ class MemoryConfig:
     reflection_timeout: float = 120.0
     reflection_total_timeout: float = 300.0
 
+    # Contradiction retirement — retire active contradictions not
+    # re-detected in N reflection passes (MF-004). 0 disables retirement.
+    contradiction_retirement_cycles: int = 14
+
     # GC retention (days)
     gc_superseded_facts_days: int = 90
     gc_superseded_journal_days: int = 90
@@ -71,6 +80,8 @@ class MemoryConfig:
 
         return cls(
             db_path=os.getenv("MEMLIFE_DB_PATH", "./memlife.db"),
+            sqlite_journal_mode=os.getenv("MEMLIFE_SQLITE_JOURNAL_MODE", "WAL"),
+            sqlite_busy_timeout_ms=int(os.getenv("MEMLIFE_SQLITE_BUSY_TIMEOUT_MS", "5000")),
             embedding_model=os.getenv("MEMLIFE_EMBEDDING_MODEL", ""),
             recall_episodes=int(os.getenv("MEMLIFE_RECALL_EPISODES", "5")),
             recall_facts=int(os.getenv("MEMLIFE_RECALL_FACTS", "5")),
@@ -90,6 +101,9 @@ class MemoryConfig:
             journal_decay_floor=float(os.getenv("MEMLIFE_JOURNAL_DECAY_FLOOR", "0.15")),
             reflection_timeout=float(os.getenv("MEMLIFE_REFLECTION_TIMEOUT", "120")),
             reflection_total_timeout=float(os.getenv("MEMLIFE_REFLECTION_TOTAL_TIMEOUT", "300")),
+            contradiction_retirement_cycles=int(
+                os.getenv("MEMLIFE_CONTRADICTION_RETIREMENT_CYCLES", "14")
+            ),
             gc_superseded_facts_days=int(os.getenv("MEMLIFE_GC_SUPERSEDED_FACTS_DAYS", "90")),
             gc_superseded_journal_days=int(os.getenv("MEMLIFE_GC_SUPERSEDED_JOURNAL_DAYS", "90")),
             gc_completed_runs_days=int(os.getenv("MEMLIFE_GC_COMPLETED_RUNS_DAYS", "60")),

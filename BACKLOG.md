@@ -20,6 +20,9 @@ write (or bump its last_detected timestamp instead of creating a new row).
 This is a memlife-level bug, not a consumer bug. Every agent using memlife's
 contradiction detection will hit this duplication unless it's fixed upstream.
 
+**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py::_store()`);
+tests pass. Pending upstreaming into the standalone memlife package.
+
 ### MF-002: WAL + busy_timeout in MemoryStore.__init__
 **Priority:** High  
 **Source:** Nano DB corruptions (2x), known since June 2026
@@ -31,6 +34,10 @@ NanoBot. Consumers currently have to enable these manually, and most don't.
 **Fix:** Enable `PRAGMA journal_mode=WAL` and `PRAGMA busy_timeout=5000` in
 `__init__` by default, before any table creation. Make it overridable via
 config but on by default.
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py` and
+`ingrid/config.py`); full test suite green (209 passed). Pending upstreaming
+into the standalone memlife package.
 
 ## API Design
 
@@ -151,6 +158,9 @@ self.fact_conflict_threshold = config.fact_conflict_threshold
 
 Add matching fields to `MemoryConfig` if they do not already exist. This is a
 blocking bug for any consumer using contradiction detection.
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`);
+tests pass. Pending upstreaming into the standalone memlife package.
 
 ### MF-009: Episode pruning missing from `run_gc()`
 **Priority:** High
