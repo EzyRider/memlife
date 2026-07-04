@@ -65,10 +65,13 @@ async def main():
         completed_runs_days=0,
         metrics_days=0,
         reflected_queue_days=0,
+        episodes_days=0,
     )
     print(f"\n--- GC result ---")
     print(f"  pruned: {gc_result['total_pruned']} rows")
-    print(f"  DB: {gc_result['db_size_before_mb']}MB → {gc_result['db_size_after_mb']}MB")
+    # Reclaim disk space (VACUUM is separate from GC per MF-006).
+    vacuum = store.run_vacuum()
+    print(f"  DB: {vacuum['db_size_before_mb']}MB -> {vacuum['db_size_after_mb']}MB")
 
     store.close()
     print("\nDone. memlife works with zero external dependencies.")

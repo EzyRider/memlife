@@ -1,10 +1,7 @@
 """Tests for the memory lifecycle: Episode → Fact → Journal → Decay → Prune."""
 
-import asyncio
-import time
 import pytest
 
-from memlife import MemoryStore, DummyEmbedder, MemoryConfig
 
 
 @pytest.mark.asyncio
@@ -51,8 +48,6 @@ async def test_fact_confidence_decay(store):
 @pytest.mark.asyncio
 async def test_journal_decay(store):
     """Journal entries have effective confidence that decays over time."""
-    from memlife.models import JournalEntry
-    import math
     
     jid = store.add_journal_entry(
         "observation", "Test observation", confidence=0.8,

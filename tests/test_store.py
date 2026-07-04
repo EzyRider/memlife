@@ -1,6 +1,5 @@
 """Tests for the core memory store."""
 
-import asyncio
 import pytest
 
 from memlife import MemoryStore, DummyEmbedder
@@ -130,7 +129,6 @@ async def test_import_export_jsonl(store, tmp_path):
     assert result["episodes"] >= 1
     assert result["facts"] >= 1
     # Import into a new store
-    import tempfile
     new_db = str(tmp_path / "import.db")
     new_store = MemoryStore(config=MemoryConfig(db_path=new_db), embedder=DummyEmbedder())
     import_result = import_jsonl(new_store, export_path)

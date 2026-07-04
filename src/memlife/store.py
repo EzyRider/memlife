@@ -729,8 +729,13 @@ class MemoryStore:
             )
             self.conn.execute("RELEASE SAVEPOINT supersede_fact")
         except Exception:
-            self.conn.execute("ROLLBACK TO SAVEPOINT supersede_fact")
-            self.conn.execute("RELEASE SAVEPOINT supersede_fact")
+            # MF-016: guard the rollback so the original exception isn't
+            # masked by a savepoint error.
+            try:
+                self.conn.execute("ROLLBACK TO SAVEPOINT supersede_fact")
+                self.conn.execute("RELEASE SAVEPOINT supersede_fact")
+            except Exception:
+                logger.warning("savepoint rollback failed for _supersede_fact", exc_info=True)
             raise
         return new_id
 
@@ -1090,13 +1095,11 @@ class MemoryStore:
             if v is None:
                 continue
             sim = cosine(query_vector, v)
-            # MF-016: use the unified score formula (sim × confidence × recency)
+            # MF-016: use the unified score formula (sim x confidence x recency)
             # matching other recall methods, instead of raw cosine similarity.
-            conf = j.confidence
-            age_days = max(0.0, (time.time() - j.created_at) / 86400.0)
             from memlife.vectors import recency_weight
             rec = recency_weight(j.created_at, halflife_days=30.0)
-            score = sim * conf * rec
+            score = sim * j.confidence * rec
             j._relevance = sim  # type: ignore[attr-defined]
             j._score = score  # type: ignore[attr-defined]
             scored.append((score, j))

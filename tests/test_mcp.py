@@ -8,7 +8,6 @@ import json
 
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder
 from memlife.mcp_server import create_server
 
 

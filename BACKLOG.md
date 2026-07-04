@@ -88,6 +88,15 @@ days), retire it — set status to 'retired' or delete it. N should be
 configurable, defaulting to something reasonable (30 cycles? 60 days?).
 This is decay applied to contradictions, which is the memlife thesis.
 
+**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`
+and `ingrid/memory/store.py`): contradictions are stored as journal entries
+with a `last_detected` cycle; re-detected pairs are touched instead of
+duplicated; unresolved contradictions are reinforced each pass; and stale
+contradictions older than `contradiction_retirement_cycles` (default 14,
+configurable via `Config`) are retired. Wired through `IngridAgent` and
+covered by targeted tests in `tests/test_journal.py`. Full test suite green
+(216 passed). Pending upstreaming into the standalone memlife package.
+
 ### MF-005: Embedding versioning backfill on contradiction cleanup
 **Priority:** Low  
 **Source:** Hermes operational experience (Gary Qdrant incident)

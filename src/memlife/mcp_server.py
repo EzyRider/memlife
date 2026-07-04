@@ -14,7 +14,6 @@ Tools exposed:
     memory_search_episodes   — Search episodes by keyword or tool name
     memory_revise       — Revise an existing fact
     memory_expire       — Mark a fact as expired
-    memory_recall       — Track which facts were used
     memory_gc           — Run garbage collection
     memory_reflect      — Run reflection pass (synthesise episodes into journal)
 
@@ -27,12 +26,10 @@ Resources:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
 import sys
-from typing import Any
 
 from memlife.config import MemoryConfig
 from memlife.store import MemoryStore
@@ -63,8 +60,8 @@ def create_server(
     embedder_type: str = "dummy",
     embedding_model: str = "dummy",
     base_url: str = "http://localhost:11434",
-    chat_model: str = "qwen3.5:cloud",
-    critic_model: str = "deepseek-v4-flash:cloud",
+    chat_model: str = "",  # MF-011: caller must provide
+    critic_model: str = "",  # MF-011: caller must provide
 ):
     """Create and configure a FastMCP server with memlife tools.
 
@@ -243,18 +240,20 @@ def create_server(
     def memory_gc() -> str:
         """Run garbage collection on old/superseded memory data. Prunes
         superseded facts (90d), superseded journal (90d), completed runs
-        (60d), metrics (30d), and reflected queue entries (30d). Runs
-        VACUUM to reclaim disk space."""
+        (60d), metrics (30d), reflected queue entries (30d), and old
+        episodes (180d). Reclaims disk space via VACUUM."""
         result = store.run_gc()
+        vacuum = store.run_vacuum()
         return (
             f"Pruned {result['total_pruned']} rows.\n"
-            f"  superseded facts:   {result['superseded_facts']}\n"
-            f"  superseded journal: {result['superseded_journal']}\n"
-            f"  agent runs:         {result['agent_runs']}\n"
-            f"  checkpoints:        {result['checkpoints']}\n"
-            f"  reflection metrics: {result['reflection_metrics']}\n"
-            f"  reflected queue:    {result['reflected_queue']}\n"
-            f"DB: {result['db_size_before_mb']}MB -> {result['db_size_after_mb']}MB"
+            f"  superseded facts:   {result.get('superseded_facts', 0)}\n"
+            f"  superseded journal: {result.get('superseded_journal', 0)}\n"
+            f"  agent runs:         {result.get('agent_runs', 0)}\n"
+            f"  checkpoints:        {result.get('checkpoints', 0)}\n"
+            f"  reflection metrics: {result.get('reflection_metrics', 0)}\n"
+            f"  reflected queue:    {result.get('reflected_queue', 0)}\n"
+            f"  episodes:           {result.get('episodes', 0)}\n"
+            f"DB: {vacuum['db_size_before_mb']}MB -> {vacuum['db_size_after_mb']}MB"
         )
 
     @mcp.tool()
@@ -277,7 +276,7 @@ def create_server(
             return f"Reflection failed: {e}"
 
         parts = [
-            f"Reflection complete.",
+            "Reflection complete.\n"
             f"  Episodes reflected: {len(result.episode_ids)}",
             f"  Observations kept:  {len(result.observations)}",
             f"  Hypotheses kept:    {len(result.hypotheses)}",
@@ -347,12 +346,12 @@ def main():
         help="Ollama base URL (default: http://localhost:11434)",
     )
     parser.add_argument(
-        "--chat-model", default=os.getenv("MEMLIFE_CHAT_MODEL", "qwen3.5:cloud"),
-        help="Ollama model for reflection synthesis (default: qwen3.5:cloud)",
+        "--chat-model", default=os.getenv("MEMLIFE_CHAT_MODEL", ""),
+        help="Ollama model for reflection synthesis (required for reflection)",
     )
     parser.add_argument(
-        "--critic-model", default=os.getenv("MEMLIFE_CRITIC_MODEL", "deepseek-v4-flash:cloud"),
-        help="Ollama model for reflection critic pass (default: deepseek-v4-flash:cloud)",
+        "--critic-model", default=os.getenv("MEMLIFE_CRITIC_MODEL", ""),
+        help="Ollama model for reflection critic pass (optional)",
     )
     parser.add_argument(
         "--log-level", default=os.getenv("MEMLIFE_LOG_LEVEL", "INFO"),

@@ -92,31 +92,37 @@ def import_jsonl(store: MemoryStore, path: str) -> dict:
 
     counts = {"episodes": 0, "facts": 0, "journal": 0, "sessions": 0}
 
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            table = obj["table"]
-            data = obj["data"]
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                table = obj["table"]
+                data = obj["data"]
 
-            if table not in _ALLOWED_COLUMNS:
-                continue
+                if table not in _ALLOWED_COLUMNS:
+                    continue
 
-            allowed = _ALLOWED_COLUMNS[table]
-            # Filter to whitelisted columns only; reject unknown keys.
-            safe_data = {k: v for k, v in data.items() if k in allowed}
-            if not safe_data:
-                continue
+                allowed = _ALLOWED_COLUMNS[table]
+                # Filter to whitelisted columns only; reject unknown keys.
+                safe_data = {k: v for k, v in data.items() if k in allowed}
+                if not safe_data:
+                    continue
 
-            cols = ", ".join(safe_data.keys())
-            placeholders = ", ".join("?" * len(safe_data))
-            store.conn.execute(
-                f"INSERT OR IGNORE INTO {table} ({cols}) VALUES ({placeholders})",
-                list(safe_data.values()),
-            )
-            counts[table] += 1
+                cols = ", ".join(safe_data.keys())
+                placeholders = ", ".join("?" * len(safe_data))
+                store.conn.execute(
+                    f"INSERT OR IGNORE INTO {table} ({cols}) VALUES ({placeholders})",
+                    list(safe_data.values()),
+                )
+                counts[table] += 1
+    except Exception:
+        # MF-016: rollback on failure so a partial import doesn't leave
+        # the database in an inconsistent state.
+        store.conn.rollback()
+        raise
 
     store.conn.commit()
     counts["total"] = sum(counts.values())

@@ -1,9 +1,8 @@
 """Tests for the unified retrieval system."""
 
-import asyncio
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder, retrieve
+from memlife import retrieve
 
 
 @pytest.mark.asyncio

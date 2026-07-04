@@ -21,7 +21,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -129,7 +128,10 @@ class OllamaChat:
 
         Tries ``model`` first (overrides the default), then fallback models.
         """
-        models = [model] + self.fallback_models if model not in self.fallback_models else [model] + [m for m in self.fallback_models if m != model]
+        # Build the model try-list: primary model first, then fallbacks
+        # with duplicates removed (MF-016: ternary precedence bug produced
+        # [model, model, ...] when model was already in fallback_models).
+        models = [model] + [m for m in self.fallback_models if m != model]
         last_error: Exception | None = None
 
         for m in models:

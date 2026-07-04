@@ -4,12 +4,11 @@ These are integration tests — they require a running Ollama instance.
 Skipped automatically if Ollama is not reachable.
 """
 
-import asyncio
 import os
 
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder
+from memlife import MemoryConfig, MemoryStore
 from memlife.adapters.ollama import OllamaEmbedder, OllamaChat
 
 
