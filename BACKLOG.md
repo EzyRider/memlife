@@ -20,8 +20,10 @@ write (or bump its last_detected timestamp instead of creating a new row).
 This is a memlife-level bug, not a consumer bug. Every agent using memlife's
 contradiction detection will hit this duplication unless it's fixed upstream.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py::_store()`);
-tests pass. Pending upstreaming into the standalone memlife package.
+**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py::_store()`)
+and upstreamed into the standalone memlife package (`src/memlife/reflection.py`)
+with `has_active_contradiction()` / `touch_active_contradiction()`. Both test
+suites green.
 
 ### MF-002: WAL + busy_timeout in MemoryStore.__init__
 **Priority:** High  
@@ -108,6 +110,12 @@ not address heavy maintenance on the hot path.
 
 This keeps lightweight pruning on the hot path and moves the expensive
 file-rebuild operation off it.
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`):
+`run_gc()` no longer runs `VACUUM`; new `run_vacuum()` method exposed via
+CLI `ingrid vacuum`, REPL/TUI `/vacuum`, HTTP `/vacuum`, and daemon task
+`vacuum`. Full test suite green (215 passed). Pending upstreaming into the
+standalone memlife package.
 
 ### MF-007: Weighted containment in `store_fact`
 **Priority:** High  

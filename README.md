@@ -106,7 +106,10 @@ from memlife import MemoryStore, MemoryConfig
 
 store = MemoryStore(config=MemoryConfig(db_path="./mem.db"))
 store.remember(task="something happened", outcome="success")
-context = await store.retrieve("something")
+
+# retrieve() is async — use SyncMemoryStore or asyncio.run():
+import asyncio
+context = asyncio.run(store.retrieve("something"))
 ```
 
 ## With an Embedder

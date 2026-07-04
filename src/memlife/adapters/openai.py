@@ -112,6 +112,9 @@ class OpenAIChat:
             messages=messages,
             temperature=self.temperature,
         )
+        # MF-016: handle empty choices list (API error / content filter).
+        if not response.choices:
+            return ""
         return response.choices[0].message.content or ""
 
     async def close(self) -> None:

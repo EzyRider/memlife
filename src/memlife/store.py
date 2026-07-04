@@ -141,6 +141,10 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS journal (
                 id TEXT PRIMARY KEY, type TEXT NOT NULL,
                 content TEXT NOT NULL, confidence REAL DEFAULT 0.5,
+                -- source_episodes_json: for observations/hypotheses/revisions
+                -- this holds episode IDs. For contradictions it holds the two
+                -- conflicting fact IDs (MF-016: documented overload, not renamed
+                -- to avoid breaking existing databases).
                 source_episodes_json TEXT DEFAULT '[]',
                 private INTEGER DEFAULT 1,
                 created_at REAL NOT NULL,
@@ -392,6 +396,8 @@ class MemoryStore:
         """Tokenised keyword recall over task and summary, ranked by match count
         × recency. Falls back to recent() if the query has no usable tokens.
         """
+        # MF-016: validate limit — negative values return all rows in SQLite.
+        limit = max(0, limit)
         tokens = self._tokenize(query)
         if not tokens:
             return self.recent(limit=limit)
@@ -457,6 +463,8 @@ class MemoryStore:
 
     def recent(self, limit: int = 10) -> list[Episode]:
         """Return most recent episodes."""
+        # MF-016: validate limit — negative values return all rows in SQLite.
+        limit = max(0, limit)
         rows = self.conn.execute(
             "SELECT id, task, outcome, summary, tool_calls_json, created_at, "
             "embedding_json FROM episodes ORDER BY created_at DESC LIMIT ?",
@@ -838,8 +846,10 @@ class MemoryStore:
 
     @staticmethod
     def _normalize(content: str) -> str:
-        """Normalise a fact for dedup: collapse whitespace, lowercase, strip punctuation tails."""
-        return re.sub(r"\s+", " ", content.strip().lower()).rstrip(".")
+        """Normalise a fact for dedup: collapse whitespace, lowercase, strip trailing punctuation."""
+        # MF-016: was rstrip(".") only — now strips all trailing punctuation
+        # so facts ending with !, ?, ;, etc. match their counterparts.
+        return re.sub(r"\s+", " ", content.strip().lower()).rstrip(".,;:!?")
 
     async def check_conflicts(self, content: str) -> list[dict]:
         """Check for existing active facts that semantically overlap with new content.
@@ -1080,8 +1090,16 @@ class MemoryStore:
             if v is None:
                 continue
             sim = cosine(query_vector, v)
+            # MF-016: use the unified score formula (sim × confidence × recency)
+            # matching other recall methods, instead of raw cosine similarity.
+            conf = j.confidence
+            age_days = max(0.0, (time.time() - j.created_at) / 86400.0)
+            from memlife.vectors import recency_weight
+            rec = recency_weight(j.created_at, halflife_days=30.0)
+            score = sim * conf * rec
             j._relevance = sim  # type: ignore[attr-defined]
-            scored.append((sim, j))
+            j._score = score  # type: ignore[attr-defined]
+            scored.append((score, j))
         scored.sort(key=lambda t: t[0], reverse=True)
         return [j for s, j in scored[:limit] if s > 0.0]
 
@@ -1399,6 +1417,7 @@ class MemoryStore:
         surviving = self.journal_by_type("observation", limit=500)
         token_sets = [set(self._tokenize(j.content)) for j in surviving]
         superseded_ids: set[str] = set()
+        merge_pairs: list[tuple[str, str]] = []  # (old_id, new_id)
         for i, j in enumerate(surviving):
             ti = token_sets[i]
             if not ti or j.id in superseded_ids:
@@ -1414,9 +1433,18 @@ class MemoryStore:
                 # surviving is newest-first, so j (i) is newer than k (i<k).
                 # Supersede the older (k) with the newer (j).
                 if sim >= 0.8:
-                    if self.supersede_journal(surviving[k].id, j.id):
-                        merged += 1
-                        superseded_ids.add(surviving[k].id)
+                    merge_pairs.append((surviving[k].id, j.id))
+                    superseded_ids.add(surviving[k].id)
+        # MF-016: batch all supersessions into one commit instead of
+        # calling supersede_journal() (which commits) per merge.
+        for old_id, new_id in merge_pairs:
+            self.conn.execute(
+                "UPDATE journal SET superseded_by = ? WHERE id = ? AND superseded_by = ''",
+                (new_id, old_id),
+            )
+        if merge_pairs:
+            self.conn.commit()
+        merged = len(merge_pairs)
         return {"retired": retired, "merged": merged}
 
     def queue_reflection(self, episode_id: str) -> None:
@@ -1487,7 +1515,14 @@ class MemoryStore:
             (run_id,),
         ).fetchone()
         if row:
-            return json.loads(row[0])
+            try:
+                return json.loads(row[0])
+            except json.JSONDecodeError:
+                logger.warning(
+                    "get_last_checkpoint: corrupt state_json for run %s; returning None",
+                    run_id,
+                )
+                return None
         return None
 
     def complete_run(
@@ -1539,6 +1574,13 @@ class MemoryStore:
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    # MF-016: context manager support for clean resource handling.
+    def __enter__(self) -> "MemoryStore":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # Embedding health + backfill
@@ -1814,9 +1856,8 @@ class MemoryStore:
         """Run garbage collection on old/superseded data.
 
         Returns a dict with counts of what was pruned. All deletions are
-        hard-deletes — the data is already superseded or obsolete. The
-        backup rotation (ingrid-db-backup.sh, daily at 2am) provides
-        the recovery path if something is deleted that shouldn't have been.
+        hard-deletes — the data is already superseded or obsolete. Keep
+        backups before running GC on production databases.
 
         Defaults are conservative:
           - Superseded facts: 90 days after supersession

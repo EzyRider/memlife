@@ -215,11 +215,14 @@ async def _dedupe_candidates(
 
 
 def _dedupe_jaccard(selected: list[_Candidate], threshold: float) -> list[_Candidate]:
-    kept: list[tuple[float, str, str, bool, frozenset[str], str]] = []
+    # MF-016: kept list stores (score, kind, text, exempt, dedup_text_str, toks, fid)
+    # so we can return dedup_text as the string the _Candidate type expects,
+    # while using toks (frozenset) for Jaccard comparison.
+    kept: list[tuple[float, str, str, bool, str, frozenset[str], str]] = []
     for score, kind, text, exempt, dedup_text, fid in selected:
         toks = _snippet_tokens(dedup_text)
         is_dup = False
-        for _, _, _, _, ktoks, _ in kept:
+        for _, _, _, _, _, ktoks, _ in kept:
             if not toks or not ktoks:
                 continue
             union = toks | ktoks
@@ -231,8 +234,8 @@ def _dedupe_jaccard(selected: list[_Candidate], threshold: float) -> list[_Candi
                 is_dup = True
                 break
         if not is_dup:
-            kept.append((score, kind, text, exempt, toks, fid))
-    return [(s, k, t, e, _dt, fid) for s, k, t, e, _dt, fid in kept]
+            kept.append((score, kind, text, exempt, dedup_text, toks, fid))
+    return [(s, k, t, e, _dt, fid) for s, k, t, e, _dt, _, fid in kept]
 
 
 async def _dedupe_embedding(

@@ -54,7 +54,9 @@ class STEmbedder:
             model = self._get_model()
             # Sentence Transformers encode is sync — run in executor
             import asyncio
-            loop = asyncio.get_event_loop()
+            # MF-016: get_event_loop() is deprecated in Python 3.10+.
+            # Use get_running_loop() since we're already in an async context.
+            loop = asyncio.get_running_loop()
             embeddings = await loop.run_in_executor(
                 None, lambda: model.encode(texts, convert_to_numpy=True)
             )
