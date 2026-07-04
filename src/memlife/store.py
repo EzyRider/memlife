@@ -27,6 +27,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 # An embedder turns a list of texts into a list of float vectors.
@@ -41,6 +42,54 @@ TRACE_EVENT_LIMIT = 200
 # immutable certainty, which blocks revision. Cap below 1.0 so every fact
 # remains updateable.
 MAX_FACT_CONFIDENCE = 0.99
+
+
+class _LockedConn:
+    """Proxy that serialises all DB access through a reentrant lock.
+
+    Wraps a sqlite3.Connection so every method call acquires the store's
+    lock first. This makes individual statements thread-safe when the
+    connection is shared across threads (e.g. the MCP server thread pool).
+    For multi-statement atomicity, use MemoryStore.transaction().
+    """
+
+    __slots__ = ("_raw", "_lock")
+
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock):
+        self._raw = conn
+        self._lock = lock
+
+    def execute(self, sql, params=()):
+        with self._lock:
+            return self._raw.execute(sql, params)
+
+    def executemany(self, sql, params_seq):
+        with self._lock:
+            return self._raw.executemany(sql, params_seq)
+
+    def executescript(self, script):
+        with self._lock:
+            return self._raw.executescript(script)
+
+    def commit(self):
+        with self._lock:
+            return self._raw.commit()
+
+    def rollback(self):
+        with self._lock:
+            return self._raw.rollback()
+
+    def close(self):
+        with self._lock:
+            return self._raw.close()
+
+    @property
+    def row_factory(self):
+        return self._raw.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value):
+        self._raw.row_factory = value
 
 
 from memlife.models import Episode, Fact, JournalEntry
@@ -78,28 +127,44 @@ class MemoryStore:
         # Consecutive embedding failure counter — resets on success, escalates
         # logging at 5+. Exposed in embedding_health() for /stats.
         self._embed_failures: int = 0
-        self._conn: sqlite3.Connection | None = None
-        # Serialises connection creation + migration, and (with check_same_thread
-        # off) all DB access from threads sharing one store. The async API can
-        # dispatch on multiple threads, so the connection is shared-but-locked.
-        self._lock = threading.Lock()
+        self._conn: _LockedConn | None = None
+        # RLock: serialises all DB access from threads sharing one store.
+        # Reentrant so transaction() can hold the lock across multiple
+        # statements without deadlocking on individual conn.execute() calls.
+        self._lock = threading.RLock()
 
     @property
-    def conn(self) -> sqlite3.Connection:
+    def conn(self) -> _LockedConn:
         if self._conn is None:
             with self._lock:
                 if self._conn is None:
-                    self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                    self._conn.row_factory = sqlite3.Row
-                    self._conn.execute(
+                    raw = sqlite3.connect(self.db_path, check_same_thread=False)
+                    raw.row_factory = sqlite3.Row
+                    raw.execute(
                         f"PRAGMA journal_mode={self.config.sqlite_journal_mode}"
                     )
-                    self._conn.execute(
+                    raw.execute(
                         f"PRAGMA busy_timeout={self.config.sqlite_busy_timeout_ms}"
                     )
+                    # Wrap in _LockedConn so every subsequent execute/commit
+                    # serialises through the RLock. This makes the shared
+                    # connection safe under the MCP server's thread pool.
+                    self._conn = _LockedConn(raw, self._lock)
                     self._init_schema()
                     self._migrate()
         return self._conn
+
+    @contextmanager
+    def transaction(self):
+        """Context manager for multi-statement atomicity.
+
+        Holds the RLock across the entire block so a sequence of
+        execute/commit calls runs atomically with respect to other
+        threads. The lock is reentrant, so individual conn.execute()
+        calls inside the block don't deadlock.
+        """
+        with self._lock:
+            yield self.conn
 
     def _init_schema(self) -> None:
         self.conn.executescript("""
@@ -715,22 +780,21 @@ class MemoryStore:
         now = time.time()
         capped = min(float(confidence), MAX_FACT_CONFIDENCE)
         try:
-            self.conn.execute("SAVEPOINT supersede_fact")
-            self.conn.execute(
-                "INSERT INTO facts (id, content, source, confidence, "
-                "embedding_json, embedding_model, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (new_id, new_content, source, capped, embedding_json,
-                 self.embedding_model_name if embedding_json else "", now, now),
-            )
-            self.conn.execute(
-                "UPDATE facts SET superseded_by = ?, updated_at = ? WHERE id = ?",
-                (new_id, now, old_id),
-            )
-            self.conn.execute("RELEASE SAVEPOINT supersede_fact")
+            with self.transaction():
+                self.conn.execute("SAVEPOINT supersede_fact")
+                self.conn.execute(
+                    "INSERT INTO facts (id, content, source, confidence, "
+                    "embedding_json, embedding_model, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_id, new_content, source, capped, embedding_json,
+                     self.embedding_model_name if embedding_json else "", now, now),
+                )
+                self.conn.execute(
+                    "UPDATE facts SET superseded_by = ?, updated_at = ? WHERE id = ?",
+                    (new_id, now, old_id),
+                )
+                self.conn.execute("RELEASE SAVEPOINT supersede_fact")
         except Exception:
-            # MF-016: guard the rollback so the original exception isn't
-            # masked by a savepoint error.
             try:
                 self.conn.execute("ROLLBACK TO SAVEPOINT supersede_fact")
                 self.conn.execute("RELEASE SAVEPOINT supersede_fact")
@@ -1543,26 +1607,28 @@ class MemoryStore:
         """Append a structured trace event to a run.
 
         Capped at ``TRACE_EVENT_LIMIT`` events (oldest dropped) so the trace
-        blob can't grow without bound across a long run. Still a read-modify-
-        write of the JSON blob — fine for the single-writer agent loop.
+        blob can't grow without bound across a long run. Atomic via
+        transaction() so concurrent trace_event calls don't lose events.
         """
-        row = self.conn.execute(
-            "SELECT trace_json FROM agent_runs WHERE id = ?", (run_id,)
-        ).fetchone()
-        if not row:
-            return
-        try:
-            trace = json.loads(row[0])
-        except json.JSONDecodeError:
-            trace = []
-        trace.append({"ts": time.time(), "event": event, "detail": detail or {}})
-        if len(trace) > TRACE_EVENT_LIMIT:
-            trace = trace[-TRACE_EVENT_LIMIT:]
-        self.conn.execute(
-            "UPDATE agent_runs SET trace_json = ? WHERE id = ?",
-            (json.dumps(trace), run_id),
-        )
-        self.conn.commit()
+        with self.transaction():
+            row = self.conn.execute(
+                "SELECT trace_json FROM agent_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if not row:
+                return
+            try:
+                trace = json.loads(row[0])
+            except json.JSONDecodeError:
+                trace = []
+            trace.append({"ts": time.time(), "event": event, "detail": detail or {}})
+            # Drop oldest beyond the cap.
+            if len(trace) > TRACE_EVENT_LIMIT:
+                trace = trace[-TRACE_EVENT_LIMIT:]
+            self.conn.execute(
+                "UPDATE agent_runs SET trace_json = ? WHERE id = ?",
+                (json.dumps(trace), run_id),
+            )
+            self.conn.commit()
 
     def get_incomplete_run(self) -> dict | None:
         row = self.conn.execute(
