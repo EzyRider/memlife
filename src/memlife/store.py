@@ -20,6 +20,7 @@ SQLite file and zero extra services.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -94,11 +95,27 @@ class _LockedConn:
 
 from memlife.models import Episode, Fact, JournalEntry
 from memlife.vectors import cosine, recency_weight
+from memlife import vec_backend, binary_vectors
 from memlife.protocols import Embedder
 from memlife.config import MemoryConfig
 # ---------------------------------------------------------------------------
 # Store
 # ---------------------------------------------------------------------------
+def _parse_annotations(raw: str | None) -> list[str]:
+    """Safely parse a JSON annotations column into a list of labels."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    return []
+
+
 class MemoryStore:
     """SQLite-backed memory: episodes, facts, journal, run/checkpoint bookkeeping."""
 
@@ -173,7 +190,8 @@ class MemoryStore:
                 outcome TEXT NOT NULL DEFAULT 'running',
                 summary TEXT DEFAULT '', tool_calls_json TEXT DEFAULT '[]',
                 created_at REAL NOT NULL,
-                embedding_json TEXT DEFAULT ''
+                embedding_json TEXT DEFAULT '',
+                is_gap_marker INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS agent_runs (
                 id TEXT PRIMARY KEY, task TEXT NOT NULL,
@@ -199,7 +217,8 @@ class MemoryStore:
                 confidence REAL DEFAULT 0.5,
                 embedding_json TEXT DEFAULT '',
                 created_at REAL NOT NULL, updated_at REAL NOT NULL,
-                superseded_by TEXT DEFAULT ''
+                superseded_by TEXT DEFAULT '',
+                annotations_json TEXT DEFAULT '[]'
             );
             CREATE INDEX IF NOT EXISTS idx_facts_content
                 ON facts(content);
@@ -215,7 +234,9 @@ class MemoryStore:
                 created_at REAL NOT NULL,
                 superseded_by TEXT DEFAULT '',
                 embedding_json TEXT DEFAULT '',
-                last_detected INTEGER DEFAULT 0
+                last_detected INTEGER DEFAULT 0,
+                annotations_json TEXT DEFAULT '[]',
+                links_json TEXT DEFAULT '[]'
             );
             CREATE INDEX IF NOT EXISTS idx_journal_type
                 ON journal(type);
@@ -261,6 +282,24 @@ class MemoryStore:
             );
             CREATE INDEX IF NOT EXISTS idx_episode_tools_name
                 ON episode_tools(tool_name);
+
+            -- Temporal triple store (MV2-003): subject-predicate-object facts
+            -- with valid time ranges. Empty valid_until means currently true.
+            CREATE TABLE IF NOT EXISTS temporal_triples (
+                id TEXT PRIMARY KEY,
+                subject TEXT NOT NULL,
+                predicate TEXT NOT NULL,
+                object TEXT NOT NULL,
+                valid_from REAL NOT NULL,
+                valid_until REAL,
+                fact_id TEXT,
+                confidence REAL DEFAULT 0.5,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_triples_subject_predicate
+                ON temporal_triples(subject, predicate, valid_from);
+            CREATE INDEX IF NOT EXISTS idx_triples_fact
+                ON temporal_triples(fact_id);
         """)
         self.conn.commit()
 
@@ -336,6 +375,41 @@ class MemoryStore:
                     f"ALTER TABLE {table} ADD COLUMN embedding_model TEXT DEFAULT ''"
                 )
 
+        # MV2-003: ensure temporal_triples table exists in existing databases.
+        tcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(temporal_triples)")}
+        if not tcols:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS temporal_triples (
+                    id TEXT PRIMARY KEY,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    valid_from REAL NOT NULL,
+                    valid_until REAL,
+                    fact_id TEXT,
+                    confidence REAL DEFAULT 0.5,
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_triples_subject_predicate
+                    ON temporal_triples(subject, predicate, valid_from);
+                CREATE INDEX IF NOT EXISTS idx_triples_fact
+                    ON temporal_triples(fact_id);
+            """)
+
+        # MV2-008: ensure episode gap-marker flag exists in existing databases.
+        ecols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)")}
+        if "is_gap_marker" not in ecols:
+            self.conn.execute("ALTER TABLE episodes ADD COLUMN is_gap_marker INTEGER DEFAULT 0")
+
+        # MV2-004: ensure annotations_json columns exist on facts and journal.
+        fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(facts)")}
+        if "annotations_json" not in fcols:
+            self.conn.execute("ALTER TABLE facts ADD COLUMN annotations_json TEXT DEFAULT '[]'")
+        if "annotations_json" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN annotations_json TEXT DEFAULT '[]'")
+        if "links_json" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN links_json TEXT DEFAULT '[]'")
+
         self.conn.commit()
 
         # Backfill episode_tools index for existing episodes that predate
@@ -369,6 +443,44 @@ class MemoryStore:
     # ------------------------------------------------------------------
     # Embedding helper
     # ------------------------------------------------------------------
+    def _serialize_vec(self, vec: list[float]) -> str:
+        """Serialize a float vector for storage.
+
+        When ``config.use_binary_vectors`` is True the vector is binarized
+        and base64-encoded as ``binary:<dim>:<bytes>``; otherwise it is
+        stored as JSON floats.
+        """
+        if not vec:
+            return ""
+        if self.config.use_binary_vectors:
+            packed = binary_vectors.binarize(vec)
+            return f"binary:{len(vec)}:{base64.b64encode(packed).decode()}"
+        return json.dumps(vec)
+
+    def _deserialize_vec(self, raw: str) -> list[float] | None:
+        """Reconstruct a float vector from its stored form."""
+        if not raw:
+            return None
+        if raw.startswith("binary:"):
+            try:
+                _, dim_str, b64 = raw.split(":", 2)
+                dim = int(dim_str)
+                packed = base64.b64decode(b64)
+                return binary_vectors.debinarize(packed, dim)
+            except Exception:
+                return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
+    def _maybe_store_vec(self, kind: str, item_id: str, vec: list[float]) -> None:
+        """Try to persist the vector in sqlite-vec; ignore failures silently."""
+        if not self.config.use_sqlite_vec or not vec:
+            return
+        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
+        vec_backend.store(raw, kind, item_id, vec)
+
     async def embed_texts(self, texts: list[str]) -> list[list[float]] | None:
         """Best-effort embedding; returns None if no embedder or it fails.
 
@@ -381,6 +493,13 @@ class MemoryStore:
         try:
             result = await self.embedder.embed(texts)
             if result is not None:
+                dims = {len(v) for v in result if v}
+                if len(dims) > 1:
+                    logger.warning(
+                        "embedder returned inconsistent vector dimensions: %s", dims
+                    )
+                    self._embed_failures += 1
+                    return None
                 self._embed_failures = 0  # reset on success
             return result
         except Exception as exc:  # noqa: BLE001
@@ -410,29 +529,74 @@ class MemoryStore:
 
         Tool call names are indexed in ``episode_tools`` for fast
         ``search_episodes_by_tool`` queries.
+
+        If ``gap_marker_threshold_hours`` is set and the new episode is
+        more than that many hours after the previous episode, a synthetic
+        "time passed" episode is inserted to preserve narrative continuity
+        (MV2-008).
         """
         ep_id = f"ep_{uuid.uuid4().hex[:12]}"
         now = time.time()
-        self.conn.execute(
-            "INSERT INTO episodes (id, task, outcome, summary, "
-            "tool_calls_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (ep_id, task, outcome, summary,
-             json.dumps(tool_calls or []), now),
-        )
-        # Index tool names for episodic search by behaviour.
-        if tool_calls:
-            seen_tools: set[str] = set()
-            for tc in tool_calls:
-                name = tc.get("tool") if isinstance(tc, dict) else None
-                if name and name not in seen_tools:
-                    seen_tools.add(name)
+
+        # MV2-008: insert a synthetic gap marker if the silence is long.
+        # The gap marker and the real episode are committed together so an
+        # orphaned marker is impossible if the process crashes mid-write.
+        threshold_hours = getattr(self.config, "gap_marker_threshold_hours", 0.0)
+        if threshold_hours > 0:
+            last_row = self.conn.execute(
+                "SELECT id, MAX(created_at) FROM episodes"
+            ).fetchone()
+            if last_row and last_row[0]:
+                last_time = last_row[1]
+                gap_hours = (now - last_time) / 3600.0
+                if gap_hours > threshold_hours:
+                    gap_id = f"gap_{uuid.uuid4().hex[:12]}"
+                    gap_label = self._format_gap(gap_hours)
+                    # Place marker midway through the gap so it sorts between
+                    # the two real episodes.
+                    marker_at = last_time + (now - last_time) / 2.0
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO episode_tools "
-                        "(episode_id, tool_name, created_at) VALUES (?, ?, ?)",
-                        (ep_id, name, now),
+                        "INSERT INTO episodes (id, task, outcome, summary, "
+                        "tool_calls_json, created_at, is_gap_marker) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (gap_id, gap_label, "", "",
+                         json.dumps([]), marker_at, 1),
                     )
-        self.conn.commit()
+
+        try:
+            self.conn.execute(
+                "INSERT INTO episodes (id, task, outcome, summary, "
+                "tool_calls_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (ep_id, task, outcome, summary,
+                 json.dumps(tool_calls or []), now),
+            )
+            # Index tool names for episodic search by behaviour.
+            if tool_calls:
+                seen_tools: set[str] = set()
+                for tc in tool_calls:
+                    name = tc.get("tool") if isinstance(tc, dict) else None
+                    if name and name not in seen_tools:
+                        seen_tools.add(name)
+                        self.conn.execute(
+                            "INSERT OR IGNORE INTO episode_tools "
+                            "(episode_id, tool_name, created_at) VALUES (?, ?, ?)",
+                            (ep_id, name, now),
+                        )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         return ep_id
+
+    def _format_gap(self, gap_hours: float) -> str:
+        """Human-readable gap marker label for a time gap."""
+        if gap_hours < 48:
+            return f"[gap: {int(round(gap_hours))} hours passed]"
+        days = gap_hours / 24.0
+        if days < 60:
+            return f"[gap: {int(round(days))} days passed]"
+        months = days / 30.44
+        return f"[gap: {int(round(months))} months passed]"
 
     async def embed_episode(self, ep_id: str) -> None:
         """Compute and store an embedding for an episode's task+summary."""
@@ -448,9 +612,10 @@ class MemoryStore:
         if vecs:
             self.conn.execute(
                 "UPDATE episodes SET embedding_json = ?, embedding_model = ? WHERE id = ?",
-                (json.dumps(vecs[0]), self.embedding_model_name, ep_id),
+                (self._serialize_vec(vecs[0]), self.embedding_model_name, ep_id),
             )
             self.conn.commit()
+            self._maybe_store_vec("episodes", ep_id, vecs[0])
 
     def _tokenize(self, query: str) -> list[str]:
         # MF-013: was len >= 3, which dropped important short terms like
@@ -474,7 +639,7 @@ class MemoryStore:
         where = " OR ".join(clauses)
         rows = self.conn.execute(
             f"SELECT id, task, outcome, summary, tool_calls_json, created_at, "
-            f"embedding_json FROM episodes WHERE ({where}) "
+            f"embedding_json, is_gap_marker FROM episodes WHERE ({where}) "
             f"ORDER BY created_at DESC LIMIT ?",
             (*params, limit * 4),
         ).fetchall()
@@ -487,6 +652,7 @@ class MemoryStore:
             hay = (ep.task + " " + ep.summary).lower()
             match_count = sum(1 for t in tokens if t in hay)
             ep._relevance = match_count / n_tokens  # type: ignore[attr-defined]
+            ep._text_score = match_count / n_tokens  # type: ignore[attr-defined]
             ep._score = ep._relevance * recency_weight(ep.created_at)  # type: ignore[attr-defined]
         eps.sort(key=lambda e: getattr(e, "_score", 0), reverse=True)
         return eps[:limit]
@@ -499,7 +665,7 @@ class MemoryStore:
         t0 = time.time()
         rows = self.conn.execute(
             "SELECT id, task, outcome, summary, tool_calls_json, created_at, "
-            "embedding_json FROM episodes WHERE embedding_json != '' "
+            "embedding_json, is_gap_marker FROM episodes WHERE embedding_json != '' "
             "ORDER BY created_at DESC LIMIT 500"
         ).fetchall()
         eps = [Episode.from_row(tuple(r)) for r in rows]
@@ -514,6 +680,7 @@ class MemoryStore:
             # (relevance × confidence × recency) actually includes cosine —
             # previously this was computed only to sort and then discarded.
             ep._relevance = sim  # type: ignore[attr-defined]
+            ep._vector_sim = sim  # type: ignore[attr-defined]
             ep._score = sim * rw  # type: ignore[attr-defined]
             scored.append((sim * rw, ep))
         scored.sort(key=lambda t: t[0], reverse=True)
@@ -532,7 +699,7 @@ class MemoryStore:
         limit = max(0, limit)
         rows = self.conn.execute(
             "SELECT id, task, outcome, summary, tool_calls_json, created_at, "
-            "embedding_json FROM episodes ORDER BY created_at DESC LIMIT ?",
+            "embedding_json, is_gap_marker FROM episodes ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [Episode.from_row(tuple(r)) for r in rows]
@@ -541,7 +708,7 @@ class MemoryStore:
         """Episodes created at/after a timestamp (for nightly reflection)."""
         rows = self.conn.execute(
             "SELECT id, task, outcome, summary, tool_calls_json, created_at, "
-            "embedding_json FROM episodes WHERE created_at >= ? "
+            "embedding_json, is_gap_marker FROM episodes WHERE created_at >= ? "
             "ORDER BY created_at DESC LIMIT ?",
             (since, limit),
         ).fetchall()
@@ -572,7 +739,7 @@ class MemoryStore:
             seg_end = oldest + (seg_size * (i + 1))
             rows = self.conn.execute(
                 "SELECT id, task, outcome, summary, tool_calls_json, "
-                "created_at, embedding_json FROM episodes "
+                "created_at, embedding_json, is_gap_marker FROM episodes "
                 "WHERE created_at >= ? AND created_at < ? "
                 "ORDER BY created_at DESC LIMIT ?",
                 (seg_start, seg_end, per_bin),
@@ -590,7 +757,8 @@ class MemoryStore:
         rows = self.conn.execute(
             self._active_journal_sql(
                 "id, type, content, confidence, source_episodes_json, "
-                "private, created_at, superseded_by, embedding_json",
+                "private, created_at, superseded_by, embedding_json, "
+                "last_detected, annotations_json, links_json",
                 "AND type IN ('observation', 'hypothesis')"
             ) + " LIMIT ?",
             (limit,),
@@ -604,7 +772,7 @@ class MemoryStore:
         placeholders = ",".join("?" * len(ids))
         rows = self.conn.execute(
             f"SELECT id, task, outcome, summary, tool_calls_json, created_at, "
-            f"embedding_json FROM episodes WHERE id IN ({placeholders})",
+            f"embedding_json, is_gap_marker FROM episodes WHERE id IN ({placeholders})",
             tuple(ids),
         ).fetchall()
         by_id = {r[0]: Episode.from_row(tuple(r)) for r in rows}
@@ -618,7 +786,7 @@ class MemoryStore:
         index for fast lookups without parsing JSON blobs."""
         sql = (
             "SELECT e.id, e.task, e.outcome, e.summary, "
-            "e.tool_calls_json, e.created_at, e.embedding_json "
+            "e.tool_calls_json, e.created_at, e.embedding_json, e.is_gap_marker "
             "FROM episodes e "
             "JOIN episode_tools et ON et.episode_id = e.id "
             "WHERE et.tool_name = ?"
@@ -677,7 +845,7 @@ class MemoryStore:
             vecs = await self.embed_texts([content])
             if vecs:
                 new_vec = vecs[0]
-        embedding_json = json.dumps(new_vec) if new_vec else ""
+        embedding_json = self._serialize_vec(new_vec) if new_vec else ""
 
         active = self._active_facts()
 
@@ -789,6 +957,10 @@ class MemoryStore:
                     (new_id, new_content, source, capped, embedding_json,
                      self.embedding_model_name if embedding_json else "", now, now),
                 )
+                if embedding_json:
+                    vec = self._deserialize_vec(embedding_json)
+                    if vec:
+                        self._maybe_store_vec("facts", new_id, vec)
                 self.conn.execute(
                     "UPDATE facts SET superseded_by = ?, updated_at = ? WHERE id = ?",
                     (new_id, now, old_id),
@@ -801,26 +973,32 @@ class MemoryStore:
             except Exception:
                 logger.warning("savepoint rollback failed for _supersede_fact", exc_info=True)
             raise
+
+        # MV2-003: expire any open triples tied to the old fact.
+        self.expire_triples_for_fact(old_id, now)
+
         return new_id
 
     def _active_facts(self) -> list[Fact]:
         """All non-superseded facts (with or without embeddings)."""
         rows = self.conn.execute(
             "SELECT id, content, source, confidence, embedding_json, "
-            "created_at, updated_at, superseded_by FROM facts "
+            "created_at, updated_at, superseded_by, annotations_json FROM facts "
             "WHERE superseded_by = ''"
         ).fetchall()
         return [Fact(
             id=r[0], content=r[1], source=r[2], confidence=r[3],
             embedding_json=r[4] or "", created_at=r[5], updated_at=r[6],
             superseded_by=r[7] or "",
+            annotations_json=r[8] or "[]",
         ) for r in rows]
 
     def fact_by_id(self, fact_id: str) -> Fact | None:
         """Fetch a single fact by id, regardless of supersession status."""
         row = self.conn.execute(
             "SELECT id, content, source, confidence, embedding_json, "
-            "created_at, updated_at, superseded_by FROM facts WHERE id = ?",
+            "created_at, updated_at, superseded_by, annotations_json "
+            "FROM facts WHERE id = ?",
             (fact_id,),
         ).fetchone()
         if not row:
@@ -829,7 +1007,227 @@ class MemoryStore:
             id=row[0], content=row[1], source=row[2], confidence=row[3],
             embedding_json=row[4] or "", created_at=row[5], updated_at=row[6],
             superseded_by=row[7] or "",
+            annotations_json=row[8] or "[]",
         )
+
+    # ------------------------------------------------------------------
+    # Temporal triples (MV2-003)
+    # ------------------------------------------------------------------
+    def store_fact_triple(
+        self,
+        fact_id: str,
+        subject: str,
+        predicate: str,
+        object: str,
+        confidence: float = 0.8,
+        valid_from: float | None = None,
+        valid_until: float | None = None,
+    ) -> str:
+        """Record that ``fact_id`` asserts ``subject predicate object``.
+
+        If the fact is currently active, ``valid_from`` defaults to now and
+        ``valid_until`` is left open (current truth).  Returns the triple id.
+        """
+        now = time.time()
+        triple_id = f"triple_{uuid.uuid4().hex[:12]}"
+        self.conn.execute(
+            "INSERT INTO temporal_triples "
+            "(id, subject, predicate, object, valid_from, valid_until, "
+            "fact_id, confidence, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (triple_id, subject.strip(), predicate.strip(), object.strip(),
+             valid_from if valid_from is not None else now, valid_until,
+             fact_id, min(float(confidence), MAX_FACT_CONFIDENCE), now),
+        )
+        self.conn.commit()
+        return triple_id
+
+    def expire_triples_for_fact(self, fact_id: str, valid_until: float | None = None) -> int:
+        """Close currently-open triples linked to ``fact_id``.
+
+        Used when a fact is superseded or revised. Returns the number of
+        triples expired.
+        """
+        until = valid_until if valid_until is not None else time.time()
+        cur = self.conn.execute(
+            "UPDATE temporal_triples SET valid_until = ? "
+            "WHERE fact_id = ? AND valid_until IS NULL",
+            (until, fact_id),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def current_truth(
+        self, subject: str, predicate: str,
+    ) -> tuple[str | None, float, str | None]:
+        """Return the current object for ``subject predicate``.
+
+        Returns ``(object, confidence, triple_id)`` or ``(None, 0.0, None)``
+        if no open triple exists.
+        """
+        now = time.time()
+        row = self.conn.execute(
+            "SELECT id, object, confidence FROM temporal_triples "
+            "WHERE subject = ? AND predicate = ? "
+            "AND valid_from <= ? AND (valid_until IS NULL OR valid_until > ?) "
+            "ORDER BY valid_from DESC, confidence DESC LIMIT 1",
+            (subject.strip(), predicate.strip(), now, now),
+        ).fetchone()
+        if not row:
+            return None, 0.0, None
+        return row[1], row[2], row[0]
+
+    def truth_as_of(
+        self, subject: str, predicate: str, timestamp: float,
+    ) -> tuple[str | None, float, str | None]:
+        """Return the object that was true at ``timestamp``.
+
+        Returns ``(object, confidence, triple_id)`` or ``(None, 0.0, None)``.
+        """
+        row = self.conn.execute(
+            "SELECT id, object, confidence FROM temporal_triples "
+            "WHERE subject = ? AND predicate = ? "
+            "AND valid_from <= ? AND (valid_until IS NULL OR valid_until > ?) "
+            "ORDER BY valid_from DESC, confidence DESC LIMIT 1",
+            (subject.strip(), predicate.strip(), timestamp, timestamp),
+        ).fetchone()
+        if not row:
+            return None, 0.0, None
+        return row[1], row[2], row[0]
+
+    def triples_for_fact(self, fact_id: str) -> list[dict]:
+        """Return all triples associated with a fact."""
+        rows = self.conn.execute(
+            "SELECT id, subject, predicate, object, valid_from, valid_until, "
+            "confidence FROM temporal_triples WHERE fact_id = ? "
+            "ORDER BY valid_from DESC",
+            (fact_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0], "subject": r[1], "predicate": r[2], "object": r[3],
+                "valid_from": r[4], "valid_until": r[5], "confidence": r[6],
+            }
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------
+    # Annotations / veracity flags (MV2-004)
+    # ------------------------------------------------------------------
+    def annotate_fact(
+        self, fact_id: str, label: str, *, dedupe: bool = True,
+    ) -> bool:
+        """Attach a veracity annotation to a fact.
+
+        Common labels: ``confirmed``, ``unsure``, ``contradicted``,
+        ``retired``.  If ``dedupe`` is True the label is not added twice.
+        Returns True if a row was updated.
+        """
+        if not label or not label.strip():
+            return False
+        label = label.strip()
+        row = self.conn.execute(
+            "SELECT annotations_json FROM facts WHERE id = ?", (fact_id,)
+        ).fetchone()
+        if not row:
+            return False
+        annotations = _parse_annotations(row[0])
+        if dedupe and label in annotations:
+            return False
+        annotations.append(label)
+        self.conn.execute(
+            "UPDATE facts SET annotations_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(annotations), time.time(), fact_id),
+        )
+        self.conn.commit()
+        return True
+
+    def annotate_journal(
+        self, entry_id: str, label: str, *, dedupe: bool = True,
+    ) -> bool:
+        """Attach a veracity annotation to a journal entry."""
+        if not label or not label.strip():
+            return False
+        label = label.strip()
+        row = self.conn.execute(
+            "SELECT annotations_json FROM journal WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if not row:
+            return False
+        annotations = _parse_annotations(row[0])
+        if dedupe and label in annotations:
+            return False
+        annotations.append(label)
+        self.conn.execute(
+            "UPDATE journal SET annotations_json = ? WHERE id = ?",
+            (json.dumps(annotations), entry_id),
+        )
+        self.conn.commit()
+        return True
+
+    def _annotations_for(
+        self, table: str, row_id: str,
+    ) -> list[str]:
+        """Load annotations list for a facts/journal row."""
+        row = self.conn.execute(
+            f"SELECT annotations_json FROM {table} WHERE id = ?", (row_id,)
+        ).fetchone()
+        if not row or not row[0]:
+            return []
+        return _parse_annotations(row[0])
+
+    def _load_links(self, entry_id: str) -> list[dict]:
+        """Load journal link list for an entry."""
+        row = self.conn.execute(
+            "SELECT links_json FROM journal WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if not row or not row[0]:
+            return []
+        try:
+            value = json.loads(row[0])
+            if isinstance(value, list):
+                return value
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return []
+
+    def link_journal_entries(
+        self,
+        from_id: str,
+        to_id: str,
+        relation: str,
+        strength: float = 1.0,
+        *,
+        bidirectional: bool = False,
+    ) -> bool:
+        """Create a belief-network link between two journal entries.
+
+        ``relation`` is one of ``supports``, ``undermines``, or ``related``.
+        ``strength`` is clamped to [0.0, 1.0].  Returns True if ``from_id``
+        was updated; raises ValueError for unsupported relations.
+        """
+        if relation not in {"supports", "undermines", "related"}:
+            raise ValueError(f"unsupported relation: {relation}")
+        if from_id == to_id:
+            return False
+        strength = max(0.0, min(1.0, float(strength)))
+        row = self.conn.execute(
+            "SELECT 1 FROM journal WHERE id = ?", (from_id,)
+        ).fetchone()
+        if not row:
+            return False
+        links = self._load_links(from_id)
+        # Replace any existing link to the same target.
+        links = [ln for ln in links if ln.get("target") != to_id]
+        links.append({"target": to_id, "relation": relation, "strength": strength})
+        self.conn.execute(
+            "UPDATE journal SET links_json = ? WHERE id = ?",
+            (json.dumps(links), from_id),
+        )
+        self.conn.commit()
+        if bidirectional:
+            self.link_journal_entries(to_id, from_id, "related", strength, bidirectional=False)
+        return True
 
     def resolve_fact(self, fact_id: str) -> Fact | None:
         """Resolve a fact id to the currently-active version.
@@ -1002,6 +1400,7 @@ class MemoryStore:
                     continue
                 sim = cosine(query_vector, f.embedding)
                 f._relevance = sim  # type: ignore[attr-defined]
+                f._vector_sim = sim  # type: ignore[attr-defined]
                 f._score = sim * f.confidence * recency_weight(f.updated_at)  # type: ignore[attr-defined]
                 scored.append((f._score, f))
             scored.sort(key=lambda t: t[0], reverse=True)
@@ -1016,7 +1415,7 @@ class MemoryStore:
         params = [f"%{t}%" for t in tokens]
         rows = self.conn.execute(
             f"SELECT id, content, source, confidence, embedding_json, "
-            f"created_at, updated_at, superseded_by FROM facts "
+            f"created_at, updated_at, superseded_by, annotations_json FROM facts "
             f"WHERE ({clauses}) AND superseded_by = '' "
             f"ORDER BY updated_at DESC LIMIT ?",
             (*params, limit * 3),
@@ -1025,12 +1424,13 @@ class MemoryStore:
             id=r[0], content=r[1], source=r[2], confidence=r[3],
             embedding_json=r[4] or "", created_at=r[5], updated_at=r[6],
             superseded_by=r[7] or "",
+            annotations_json=r[8] or "[]",
         ) for r in rows]
-        # Score by normalised relevance × confidence × recency.
         n_tokens = max(1, len(tokens))
         for f in facts:
             match = sum(1 for t in tokens if t in f.content.lower())
             f._relevance = match / n_tokens  # type: ignore[attr-defined]
+            f._text_score = match / n_tokens  # type: ignore[attr-defined]
             f._score = f._relevance * f.confidence * recency_weight(f.updated_at)  # type: ignore[attr-defined]
         facts.sort(key=lambda f: getattr(f, "_score", 0), reverse=True)
         return facts[:limit]
@@ -1038,13 +1438,14 @@ class MemoryStore:
     def _facts_with_embeddings(self) -> list[Fact]:
         rows = self.conn.execute(
             "SELECT id, content, source, confidence, embedding_json, "
-            "created_at, updated_at, superseded_by FROM facts "
+            "created_at, updated_at, superseded_by, annotations_json FROM facts "
             "WHERE embedding_json != '' AND superseded_by = ''"
         ).fetchall()
         return [Fact(
             id=r[0], content=r[1], source=r[2], confidence=r[3],
             embedding_json=r[4] or "", created_at=r[5], updated_at=r[6],
             superseded_by=r[7] or "",
+            annotations_json=r[8] or "[]",
         ) for r in rows]
 
     def _facts_with_embeddings_since(self, since: float) -> list[Fact]:
@@ -1053,7 +1454,7 @@ class MemoryStore:
         compare new/changed facts against the full set, not all pairs."""
         rows = self.conn.execute(
             "SELECT id, content, source, confidence, embedding_json, "
-            "created_at, updated_at, superseded_by FROM facts "
+            "created_at, updated_at, superseded_by, annotations_json FROM facts "
             "WHERE embedding_json != '' AND superseded_by = '' "
             "AND (created_at >= ? OR updated_at >= ?)",
             (since, since),
@@ -1062,6 +1463,7 @@ class MemoryStore:
             id=r[0], content=r[1], source=r[2], confidence=r[3],
             embedding_json=r[4] or "", created_at=r[5], updated_at=r[6],
             superseded_by=r[7] or "",
+            annotations_json=r[8] or "[]",
         ) for r in rows]
 
     def _active_facts_since(self, since: float) -> list[Fact]:
@@ -1069,7 +1471,7 @@ class MemoryStore:
         ``since``. Lexical fallback path for incremental contradiction detection."""
         rows = self.conn.execute(
             "SELECT id, content, source, confidence, embedding_json, "
-            "created_at, updated_at, superseded_by FROM facts "
+            "created_at, updated_at, superseded_by, annotations_json FROM facts "
             "WHERE superseded_by = '' AND (created_at >= ? OR updated_at >= ?)",
             (since, since),
         ).fetchall()
@@ -1077,6 +1479,7 @@ class MemoryStore:
             id=r[0], content=r[1], source=r[2], confidence=r[3],
             embedding_json=r[4] or "", created_at=r[5], updated_at=r[6],
             superseded_by=r[7] or "",
+            annotations_json=r[8] or "[]",
         ) for r in rows]
 
     async def revise_fact(self, fact_id: str, new_content: str, confidence: float = 0.7) -> str:
@@ -1095,7 +1498,7 @@ class MemoryStore:
         embedding_json = ""
         vecs = await self.embed_texts([new_content])
         if vecs:
-            embedding_json = json.dumps(vecs[0])
+            embedding_json = self._serialize_vec(vecs[0])
         return await self._supersede_fact(
             fact_id, new_content, row[0], confidence, embedding_json)
 
@@ -1132,9 +1535,10 @@ class MemoryStore:
         if vecs:
             self.conn.execute(
                 "UPDATE journal SET embedding_json = ?, embedding_model = ? WHERE id = ?",
-                (json.dumps(vecs[0]), self.embedding_model_name, jid),
+                (self._serialize_vec(vecs[0]), self.embedding_model_name, jid),
             )
             self.conn.commit()
+            self._maybe_store_vec("journal", jid, vecs[0])
 
     async def recall_journal_vector(
         self, query_vector: list[float], limit: int = 5,
@@ -1147,7 +1551,8 @@ class MemoryStore:
         """
         rows = self.conn.execute(
             "SELECT id, type, content, confidence, source_episodes_json, "
-            "private, created_at, superseded_by, embedding_json "
+            "private, created_at, superseded_by, embedding_json, "
+            "last_detected, annotations_json, links_json "
             "FROM journal WHERE superseded_by = '' AND embedding_json != '' "
             "AND type != 'contradiction' "
             "ORDER BY created_at DESC LIMIT 500"
@@ -1165,6 +1570,7 @@ class MemoryStore:
             rec = recency_weight(j.created_at, halflife_days=30.0)
             score = sim * j.confidence * rec
             j._relevance = sim  # type: ignore[attr-defined]
+            j._vector_sim = sim  # type: ignore[attr-defined]
             j._score = score  # type: ignore[attr-defined]
             scored.append((score, j))
         scored.sort(key=lambda t: t[0], reverse=True)
@@ -1182,7 +1588,8 @@ class MemoryStore:
         rows = self.conn.execute(
             self._active_journal_sql(
                 "id, type, content, confidence, source_episodes_json, "
-                "private, created_at, superseded_by, embedding_json",
+                "private, created_at, superseded_by, embedding_json, "
+                "last_detected, annotations_json, links_json",
                 "AND type IN ('observation', 'hypothesis')"
             ) + " LIMIT 500"
         ).fetchall()
@@ -1206,7 +1613,7 @@ class MemoryStore:
             return self.recent(limit=limit)
         rows = self.conn.execute(
             "SELECT id, task, outcome, summary, tool_calls_json, "
-            "created_at, embedding_json FROM episodes "
+            "created_at, embedding_json, is_gap_marker FROM episodes "
             "ORDER BY created_at DESC LIMIT 500"
         ).fetchall()
         episodes = [Episode.from_row(tuple(r)) for r in rows]
@@ -1374,6 +1781,8 @@ class MemoryStore:
             created_at=r[6], superseded_by=r[7] or "",
             embedding_json=(r[8] or "") if len(r) > 8 else "",
             last_detected=r[9] if len(r) > 9 else 0,
+            annotations_json=(r[10] or "[]") if len(r) > 10 else "[]",
+            links_json=(r[11] or "[]") if len(r) > 11 else "[]",
         )
 
     def _active_journal_sql(self, select: str, extra_where: str = "") -> str:
@@ -1399,7 +1808,8 @@ class MemoryStore:
         rows = self.conn.execute(
             self._active_journal_sql(
                 "id, type, content, confidence, source_episodes_json, "
-                "private, created_at, superseded_by, embedding_json"
+                "private, created_at, superseded_by, embedding_json, "
+                "last_detected, annotations_json, links_json"
             ) + " LIMIT ?",
             (limit,),
         ).fetchall()
@@ -1409,7 +1819,8 @@ class MemoryStore:
         rows = self.conn.execute(
             self._active_journal_sql(
                 "id, type, content, confidence, source_episodes_json, "
-                "private, created_at, superseded_by, embedding_json",
+                "private, created_at, superseded_by, embedding_json, "
+                "last_detected, annotations_json, links_json",
                 "AND type = ?"
             ) + " LIMIT ?",
             (type, limit),
@@ -1423,7 +1834,8 @@ class MemoryStore:
             rows = self.conn.execute(
                 self._active_journal_sql(
                     "id, type, content, confidence, source_episodes_json, "
-                    "private, created_at, superseded_by, embedding_json"
+                    "private, created_at, superseded_by, embedding_json, "
+                    "last_detected, annotations_json, links_json"
                 ) + " LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -1432,7 +1844,8 @@ class MemoryStore:
         params = [f"%{t}%" for t in tokens]
         rows = self.conn.execute(
             f"SELECT id, type, content, confidence, source_episodes_json, "
-            f"private, created_at, superseded_by, embedding_json FROM journal "
+            f"private, created_at, superseded_by, embedding_json, "
+            f"last_detected, annotations_json, links_json FROM journal "
             f"WHERE superseded_by = '' AND type != 'contradiction' "
             f"AND ({clauses}) "
             f"ORDER BY created_at DESC LIMIT ?",
@@ -1444,6 +1857,7 @@ class MemoryStore:
             hay = j.content.lower()
             j._match_score = sum(1 for t in tokens if t in hay)  # type: ignore[attr-defined]
             j._relevance = j._match_score / n_tokens  # type: ignore[attr-defined]
+            j._text_score = j._match_score / n_tokens  # type: ignore[attr-defined]
         entries.sort(
             key=lambda e: (getattr(e, "_match_score", 0), e.confidence, e.created_at),
             reverse=True,

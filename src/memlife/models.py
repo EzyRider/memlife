@@ -5,7 +5,34 @@ from __future__ import annotations
 import json
 import math
 import time
+import base64
 from dataclasses import dataclass, field
+
+
+def _decode_embedding(raw: str) -> list[float] | None:
+    """Decode an embedding from JSON or binary ``binary:dim:base64`` form."""
+    if not raw:
+        return None
+    if raw.startswith("binary:"):
+        try:
+            _, dim_str, b64 = raw.split(":", 2)
+            dim = int(dim_str)
+            packed = base64.b64decode(b64)
+            vec = []
+            for i in range(dim):
+                byte_idx = i // 8
+                bit_idx = 7 - (i % 8)
+                if byte_idx >= len(packed):
+                    return None
+                bit = (packed[byte_idx] >> bit_idx) & 1
+                vec.append(1.0 if bit else -1.0)
+            return vec
+        except Exception:
+            return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
 
 
 @dataclass
@@ -19,10 +46,19 @@ class Episode:
     tool_calls_json: str = "[]"
     created_at: float = field(default_factory=time.time)
     embedding_json: str = ""
+    is_gap_marker: bool = False
 
     @classmethod
     def from_row(cls, row: tuple) -> "Episode":
-        # Tolerate rows from pre-migration schemas that lack embedding_json.
+        # Tolerate rows from pre-migration schemas that lack embedding_json
+        # or is_gap_marker.
+        if len(row) >= 8:
+            return cls(
+                id=row[0], task=row[1], outcome=row[2],
+                summary=row[3] or "", tool_calls_json=row[4] or "[]",
+                created_at=row[5], embedding_json=row[6] or "",
+                is_gap_marker=bool(row[7]) if row[7] is not None else False,
+            )
         if len(row) >= 7:
             return cls(
                 id=row[0], task=row[1], outcome=row[2],
@@ -43,13 +79,28 @@ class Episode:
             return []
 
     @property
+    def has_tool_calls(self) -> bool:
+        """True if the episode recorded at least one tool invocation."""
+        try:
+            return len(json.loads(self.tool_calls_json)) > 0
+        except Exception:
+            return False
+
+    @property
+    def is_success(self) -> bool:
+        """A successful episode outcome, case-insensitive."""
+        return self.outcome.lower() in {"success", "succeeded", "ok"}
+
+    @property
+    def is_failure(self) -> bool:
+        """An explicitly failed outcome."""
+        return self.outcome.lower() in {"failed", "failure", "error"}
+
+    @property
     def embedding(self) -> list[float] | None:
         if not self.embedding_json:
             return None
-        try:
-            return json.loads(self.embedding_json)
-        except json.JSONDecodeError:
-            return None
+        return _decode_embedding(self.embedding_json)
 
     def index_text(self) -> str:
         """Text used for embedding/recall: task + summary."""
@@ -68,15 +119,28 @@ class Fact:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     superseded_by: str = ""
+    annotations_json: str = "[]"
 
     @property
     def embedding(self) -> list[float] | None:
         if not self.embedding_json:
             return None
+        return _decode_embedding(self.embedding_json)
+
+    @property
+    def annotations(self) -> list[str]:
         try:
-            return json.loads(self.embedding_json)
-        except json.JSONDecodeError:
-            return None
+            return json.loads(self.annotations_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def effective_confidence(
+        self, halflife_days: float = 365.0, floor: float = 0.1
+    ) -> float:
+        """Confidence decayed by age, floored at ``floor``."""
+        age_days = max(0.0, (time.time() - self.updated_at) / 86400.0)
+        decay = math.pow(0.5, age_days / max(1e-6, halflife_days))
+        return max(self.confidence * decay, floor)
 
 
 @dataclass
@@ -93,6 +157,8 @@ class JournalEntry:
     superseded_by: str = ""
     embedding_json: str = ""
     last_detected: int = 0  # reflection cycle when last re-detected (contradictions)
+    annotations_json: str = "[]"
+    links_json: str = "[]"  # [{"target": id, "relation": "supports"|"undermines"|"related", "strength": float}]
 
     @property
     def source_episodes(self) -> list[str]:
@@ -100,6 +166,23 @@ class JournalEntry:
             return json.loads(self.source_episodes_json)
         except json.JSONDecodeError:
             return []
+
+    @property
+    def annotations(self) -> list[str]:
+        try:
+            return json.loads(self.annotations_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @property
+    def links(self) -> list[dict]:
+        try:
+            links = json.loads(self.links_json)
+            if isinstance(links, list):
+                return links
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return []
 
     @property
     def superseded(self) -> bool:
@@ -115,10 +198,7 @@ class JournalEntry:
     def embedding(self) -> list[float] | None:
         if not self.embedding_json:
             return None
-        try:
-            return json.loads(self.embedding_json)
-        except json.JSONDecodeError:
-            return None
+        return _decode_embedding(self.embedding_json)
 
     def effective_confidence(self, halflife_days: float = 30.0, floor: float = 0.15) -> float:
         """Confidence decayed by age, floored at ``floor`` (never falls to 0).

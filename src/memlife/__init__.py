@@ -24,7 +24,7 @@ from memlife.store import MemoryStore
 from memlife.sync_store import SyncMemoryStore
 from memlife.vectors import cosine, recency_weight
 
-__version__ = "0.3.7b0"
+__version__ = "0.4.0b0"
 
 __all__ = [
     "MemoryStore",
@@ -45,9 +45,14 @@ __all__ = [
     "run_gc",
     "export_jsonl",
     "import_jsonl",
+    "vec_backend",
+    "binary_vectors",
+    "memorias",
+    "polyphonic",
 ]
 
 # Convenience imports
 from memlife.retrieval import retrieve
 from memlife.gc import run_gc
 from memlife.io import export_jsonl, import_jsonl
+
