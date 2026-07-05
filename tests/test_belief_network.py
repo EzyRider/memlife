@@ -30,7 +30,7 @@ def test_link_journal_entries(belief_store):
     assert store.link_journal_entries(a, b, "related", strength=0.7) is True
     entries = store.journal_by_type("observation", limit=2)
     entry = next(e for e in entries if e.id == a)
-    assert entry.links == [{"target": b, "relation": "related", "strength": 0.7}]
+    assert entry.links == [{"target": b, "relation": "related", "strength": 0.7, "belief_type": "world", "evidence": ""}]
 
 
 def test_link_replaces_existing_to_same_target(belief_store):
@@ -45,6 +45,8 @@ def test_link_replaces_existing_to_same_target(belief_store):
     assert len(entry.links) == 1
     assert entry.links[0]["relation"] == "undermines"
     assert entry.links[0]["strength"] == pytest.approx(0.9)
+    assert entry.links[0]["belief_type"] == "world"
+    assert entry.links[0]["evidence"] == ""
 
 
 def test_link_missing_from_returns_false(belief_store):
@@ -88,8 +90,8 @@ def test_bidirectional_link(belief_store):
 
     a_entry = next(e for e in store.journal_by_type("observation", limit=2) if e.id == a)
     b_entry = next(e for e in store.journal_by_type("observation", limit=2) if e.id == b)
-    assert a_entry.links == [{"target": b, "relation": "supports", "strength": 1.0}]
-    assert b_entry.links == [{"target": a, "relation": "related", "strength": 1.0}]
+    assert a_entry.links == [{"target": b, "relation": "supports", "strength": 1.0, "belief_type": "world", "evidence": ""}]
+    assert b_entry.links == [{"target": a, "relation": "related", "strength": 1.0, "belief_type": "world", "evidence": ""}]
 
 
 @pytest.mark.asyncio
@@ -102,7 +104,7 @@ async def test_links_appear_in_debug_candidates(belief_store):
     result = await retrieve(store, "spicy food", debug=True)
     candidates = result["candidates"]  # type: ignore[index]
     entry = next(c for c in candidates if c["id"] == a)
-    assert entry["links"] == [{"target": b, "relation": "supports", "strength": 1.0}]
+    assert entry["links"] == [{"target": b, "relation": "supports", "strength": 1.0, "belief_type": "world", "evidence": ""}]
 
 
 def test_default_links_empty():
@@ -110,3 +112,21 @@ def test_default_links_empty():
 
     entry = JournalEntry(id="x", type="observation", content="c")
     assert entry.links == []
+
+def test_link_user_belief_type(belief_store):
+    store = belief_store
+    a = store.add_journal_entry(content="User prefers email", type="observation", confidence=0.9)
+    b = store.add_journal_entry(content="User ignored Slack", type="observation", confidence=0.8)
+    store.link_journal_entries(a, b, "supports", belief_type="user", evidence="stated explicitly")
+
+    entry = next(e for e in store.journal_by_type("observation", limit=2) if e.id == a)
+    assert entry.links[0]["belief_type"] == "user"
+    assert entry.links[0]["evidence"] == "stated explicitly"
+
+
+def test_link_invalid_belief_type_raises(belief_store):
+    store = belief_store
+    a = store.add_journal_entry(content="A", type="observation", confidence=0.9)
+    b = store.add_journal_entry(content="B", type="observation", confidence=0.8)
+    with pytest.raises(ValueError, match="unsupported belief_type"):
+        store.link_journal_entries(a, b, "related", belief_type="opinion")

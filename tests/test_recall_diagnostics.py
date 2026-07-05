@@ -106,3 +106,24 @@ async def test_why_says_old_for_aged_episode(diag_store):
     by_id = {c["id"]: c for c in result["candidates"]}  # type: ignore[index]
     assert "ep_old" in by_id
     assert "old" in by_id["ep_old"]["why"]
+
+@pytest.mark.asyncio
+async def test_retrieve_updates_recall_counters(diag_store):
+    """retrieve() increments path counters surfaced via store.recall_stats()."""
+    store = diag_store
+    now = time.time()
+    store.conn.execute(
+        "INSERT INTO facts (id, content, source, confidence, embedding_json, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("f1", "User likes pizza", "user", 0.9, "", now, now),
+    )
+    store.conn.commit()
+
+    before = store.recall_stats()
+    await retrieve(store, "pizza")
+    after = store.recall_stats()
+
+    assert after["retrieve_calls"] == before["retrieve_calls"] + 1
+    assert after["facts_considered"] >= before["facts_considered"] + 1
+    assert "episodes_considered" in after
+    assert "journal_considered" in after

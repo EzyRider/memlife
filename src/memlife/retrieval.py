@@ -181,6 +181,10 @@ async def retrieve(
     if config is None:
         config = store.config or MemoryConfig()
 
+    # MV2-006: path counters.
+    counters = store._recall_counters
+    counters["retrieve_calls"] += 1
+
     # Layer-aware decay halflifes.
     decay = {
         "episode": config.episode_decay_halflife_days,
@@ -212,7 +216,10 @@ async def retrieve(
             logger.debug("episode vector recall failed: %s", exc)
     if not episodes:
         episodes = store.recall(query, limit=config.recall_episodes * 2)
+        if query_vec is not None:
+            counters["vector_fallback_to_keyword"] += 1
 
+    counters["episodes_considered"] += len(episodes)
     for ep in episodes:
         vector_sim = getattr(ep, "_vector_sim", 0.0)
         text_score = _text_score_for(query_tokens, ep.index_text())
@@ -249,6 +256,7 @@ async def retrieve(
         logger.debug("fact recall failed: %s", exc)
         facts = []
 
+    counters["facts_considered"] += len(facts)
     for f in facts:
         vector_sim = getattr(f, "_vector_sim", 0.0)
         text_score = _text_score_for(query_tokens, f.content)
@@ -277,7 +285,10 @@ async def retrieve(
             logger.debug("journal vector recall failed: %s", exc)
     if not notes:
         notes = store.journal_relevant(query, limit=config.recall_journal * 2)
+        if query_vec is not None:
+            counters["vector_fallback_to_keyword"] += 1
 
+    counters["journal_considered"] += len(notes)
     for j in notes:
         vector_sim = getattr(j, "_vector_sim", 0.0)
         text_score = _text_score_for(query_tokens, j.content)
@@ -305,6 +316,7 @@ async def retrieve(
     if config.use_polyphonic_recall:
         from memlife import polyphonic
 
+        counters["polyphonic_fusion_calls"] += 1
         voice_groups: dict[str, list[_RecallSignals]] = {
             "vector": sorted(candidates, key=lambda c: c.vector_sim, reverse=True),
             "text": sorted(candidates, key=lambda c: c.text_score, reverse=True),
@@ -313,6 +325,23 @@ async def retrieve(
             "recency": sorted(candidates, key=lambda c: c.recency, reverse=True),
         }
         pool = polyphonic.fuse_candidates(voice_groups, config)[:top_n]
+        # Count how many candidates each voice contributed to the fused pool.
+        voice_ids = {c.item.id for c in pool if getattr(c.item, "id", None)}
+        counters["voice_hits_vector"] += len(
+            [c for c in voice_groups["vector"][:top_n] if getattr(c.item, "id", "") in voice_ids]
+        )
+        counters["voice_hits_text"] += len(
+            [c for c in voice_groups["text"][:top_n] if getattr(c.item, "id", "") in voice_ids]
+        )
+        counters["voice_hits_source"] += len(
+            [c for c in voice_groups["source"][:top_n] if getattr(c.item, "id", "") in voice_ids]
+        )
+        counters["voice_hits_veracity"] += len(
+            [c for c in voice_groups["veracity"][:top_n] if getattr(c.item, "id", "") in voice_ids]
+        )
+        counters["voice_hits_recency"] += len(
+            [c for c in voice_groups["recency"][:top_n] if getattr(c.item, "id", "") in voice_ids]
+        )
 
     selected = await _dedupe_candidates(store, pool, config)
 

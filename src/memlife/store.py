@@ -149,6 +149,20 @@ class MemoryStore:
         # Reentrant so transaction() can hold the lock across multiple
         # statements without deadlocking on individual conn.execute() calls.
         self._lock = threading.RLock()
+        # MV2-006: path counters for recall diagnostics / memlife://stats.
+        self._recall_counters: dict[str, int] = {
+            "retrieve_calls": 0,
+            "episodes_considered": 0,
+            "facts_considered": 0,
+            "journal_considered": 0,
+            "vector_fallback_to_keyword": 0,
+            "polyphonic_fusion_calls": 0,
+            "voice_hits_vector": 0,
+            "voice_hits_text": 0,
+            "voice_hits_source": 0,
+            "voice_hits_veracity": 0,
+            "voice_hits_recency": 0,
+        }
 
     @property
     def conn(self) -> _LockedConn:
@@ -1199,15 +1213,22 @@ class MemoryStore:
         strength: float = 1.0,
         *,
         bidirectional: bool = False,
+        belief_type: str = "world",
+        evidence: str = "",
     ) -> bool:
         """Create a belief-network link between two journal entries.
 
         ``relation`` is one of ``supports``, ``undermines``, or ``related``.
-        ``strength`` is clamped to [0.0, 1.0].  Returns True if ``from_id``
-        was updated; raises ValueError for unsupported relations.
+        ``strength`` is clamped to [0.0, 1.0].
+        ``belief_type`` is ``user`` or ``world`` (MV2-009).
+        ``evidence`` is an optional free-form provenance note.
+        Returns True if ``from_id`` was updated; raises ValueError for
+        unsupported relations or belief types.
         """
         if relation not in {"supports", "undermines", "related"}:
             raise ValueError(f"unsupported relation: {relation}")
+        if belief_type not in {"user", "world"}:
+            raise ValueError(f"unsupported belief_type: {belief_type}")
         if from_id == to_id:
             return False
         strength = max(0.0, min(1.0, float(strength)))
@@ -1219,14 +1240,23 @@ class MemoryStore:
         links = self._load_links(from_id)
         # Replace any existing link to the same target.
         links = [ln for ln in links if ln.get("target") != to_id]
-        links.append({"target": to_id, "relation": relation, "strength": strength})
+        links.append({
+            "target": to_id,
+            "relation": relation,
+            "strength": strength,
+            "belief_type": belief_type,
+            "evidence": evidence,
+        })
         self.conn.execute(
             "UPDATE journal SET links_json = ? WHERE id = ?",
             (json.dumps(links), from_id),
         )
         self.conn.commit()
         if bidirectional:
-            self.link_journal_entries(to_id, from_id, "related", strength, bidirectional=False)
+            self.link_journal_entries(
+                to_id, from_id, "related", strength,
+                bidirectional=False, belief_type=belief_type, evidence=evidence,
+            )
         return True
 
     def resolve_fact(self, fact_id: str) -> Fact | None:
@@ -2453,6 +2483,10 @@ class MemoryStore:
             "db_size_before_mb": round(old_size / 1024 / 1024, 1),
             "db_size_after_mb": round(new_size / 1024 / 1024, 1),
         }
+
+    def recall_stats(self) -> dict:
+        """Return recall path counters since store creation."""
+        return self._recall_counters.copy()
 
     def get_metrics_summary(self) -> dict:
         """Return aggregate metrics across all reflections plus current unresolved contradictions."""

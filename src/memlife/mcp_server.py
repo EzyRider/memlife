@@ -299,10 +299,11 @@ def create_server(
 
     @mcp.resource("memlife://stats")
     def stats() -> str:
-        """Memory statistics: fact count, episode count, journal entries,
-        embedding health, and reflection metrics."""
+        """Memory statistics: counts, embedding health, reflection metrics,
+        and recall path counters (MV2-006)."""
         health = store.embedding_health()
         summary = store.get_metrics_summary()
+        recall = store.recall_stats()
         return json.dumps({
             "embedding_model": health.get("embedding_model", ""),
             "facts": health["facts"],
@@ -310,6 +311,7 @@ def create_server(
             "episodes": health["episodes"],
             "reflection_count": summary.get("total_reflections", 0),
             "unresolved_contradictions": summary.get("unresolved_contradictions", 0),
+            "recall": recall,
         }, indent=2)
 
     @mcp.resource("memlife://health")
