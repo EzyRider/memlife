@@ -1,15 +1,22 @@
 """Tests for the Ollama adapter.
 
 These are integration tests — they require a running Ollama instance.
-Skipped automatically if Ollama is not reachable.
+Skipped automatically if Ollama is not reachable or aiohttp is not installed.
 """
 
 import os
 
 import pytest
 
+try:
+    from memlife.adapters.ollama import OllamaEmbedder, OllamaChat
+    _AIOHTTP_AVAILABLE = True
+except ImportError:
+    _AIOHTTP_AVAILABLE = False
+    OllamaEmbedder = None
+    OllamaChat = None
+
 from memlife import MemoryConfig, MemoryStore
-from memlife.adapters.ollama import OllamaEmbedder, OllamaChat
 
 
 def _ollama_reachable():
@@ -23,8 +30,8 @@ def _ollama_reachable():
 
 
 pytestmark = pytest.mark.skipif(
-    not _ollama_reachable(),
-    reason="Ollama not reachable at localhost:11434",
+    not _AIOHTTP_AVAILABLE or not _ollama_reachable(),
+    reason="Ollama not reachable or aiohttp not installed",
 )
 
 
@@ -68,14 +75,14 @@ async def test_ollama_embedder_returns_none_on_bad_model():
 async def test_ollama_chat_returns_text():
     """OllamaChat returns text content from the model."""
     chat = OllamaChat(
-        model=os.getenv("INGRID_MODEL", "qwen3.5:cloud"),
+        model=os.getenv("MEMLIFE_TEST_MODEL", "qwen3.5:cloud"),
         max_retries=1,
         timeout=30.0,
     )
     try:
         response = await chat.chat(
             [{"role": "user", "content": "Say 'hello' and nothing else."}],
-            model=os.getenv("INGRID_MODEL", "qwen3.5:cloud"),
+            model=os.getenv("MEMLIFE_TEST_MODEL", "qwen3.5:cloud"),
         )
         assert isinstance(response, str)
         assert len(response) > 0
