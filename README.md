@@ -46,7 +46,7 @@ from memlife import MemoryStore, MemoryConfig, DummyEmbedder
 
 async def main():
     store = MemoryStore(
-        config=MemoryConfig(db_path="./mem.db", embedding_model="dummy"),
+        config=MemoryConfig(db_path="./memlife.db", embedding_model="dummy"),
         embedder=DummyEmbedder(),
     )
 
@@ -104,7 +104,7 @@ The store, retrieval, decay, GC, and embedding versioning all work without any L
 ```python
 from memlife import MemoryStore, MemoryConfig
 
-store = MemoryStore(config=MemoryConfig(db_path="./mem.db"))
+store = MemoryStore(config=MemoryConfig(db_path="./memlife.db"))
 store.remember(task="something happened", outcome="success")
 
 # retrieve() is async — use SyncMemoryStore or asyncio.run():
@@ -121,7 +121,7 @@ from memlife.adapters.ollama import OllamaEmbedder
 
 async def main():
     store = MemoryStore(
-        config=MemoryConfig(db_path="./mem.db", embedding_model="mxbai-embed-large:latest"),
+        config=MemoryConfig(db_path="./memlife.db", embedding_model="mxbai-embed-large:latest"),
         embedder=OllamaEmbedder(model="mxbai-embed-large:latest"),
     )
     await store.store_fact("User prefers dark mode", confidence=0.9)
@@ -141,7 +141,7 @@ from memlife import MemoryStore, MemoryConfig, Reflector, DummyEmbedder, DummyCh
 
 async def main():
     store = MemoryStore(
-        config=MemoryConfig(db_path="./mem.db", embedding_model="dummy"),
+        config=MemoryConfig(db_path="./memlife.db", embedding_model="dummy"),
         embedder=DummyEmbedder(),
     )
     reflector = Reflector(
@@ -173,7 +173,7 @@ For non-async codebases:
 from memlife import SyncMemoryStore, MemoryConfig, DummyEmbedder
 
 store = SyncMemoryStore(
-    config=MemoryConfig(db_path="./mem.db", embedding_model="dummy"),
+    config=MemoryConfig(db_path="./memlife.db", embedding_model="dummy"),
     embedder=DummyEmbedder(),
 )
 store.remember(task="hello", outcome="success")
@@ -186,7 +186,7 @@ context = store.retrieve("test")
 Expose memlife to any MCP-compatible agent (Claude Desktop, Cursor, etc.):
 
 ```bash
-memlife-mcp-server --db ./mem.db --embedder ollama --embedding-model mxbai-embed-large:latest
+memlife-mcp-server --db ./memlife.db --embedder ollama --embedding-model mxbai-embed-large:latest
 ```
 
 Claude Desktop config:
@@ -202,7 +202,7 @@ Claude Desktop config:
   "mcpServers": {
     "memlife": {
       "command": "memlife-mcp-server",
-      "args": ["--db", "/path/to/mem.db", "--embedder", "ollama", "--embedding-model", "mxbai-embed-large:latest"]
+      "args": ["--db", "/path/to/memlife.db", "--embedder", "ollama", "--embedding-model", "mxbai-embed-large:latest"]
     }
   }
 }
