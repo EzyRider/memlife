@@ -233,6 +233,10 @@ def __init__(self, ..., agent_name: str = "the agent"):
 
 Use `f"You are {self.agent_name}'s reflective faculty."` in the prompt.
 
+**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`);
+full test suite green (218 passed). Pending upstreaming into the standalone
+memlife package.
+
 ### MF-011: Hardcoded model names in Reflector and adapters
 **Priority:** Medium
 **Source:** Second-agent code review, July 2026
@@ -245,6 +249,10 @@ confusing failures.
 **Fix:** Remove model-specific defaults. Require callers to pass a model name,
 raise a clear error if unset, and document the requirement in the adapter and
 `Reflector` constructors.
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`
+and `ingrid/models/ollama.py`); full test suite green (218 passed). Pending
+upstreaming into the standalone memlife package.
 
 ### MF-012: SQL injection in `import_jsonl` via column names
 **Priority:** High
@@ -268,6 +276,10 @@ query for "AI deployment" is reduced to just "deployment".
 
 **Fix:** Lower the minimum token length to 2, or replace the length filter
 with a proper stop-word list. At minimum, document the behavior.
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`);
+full test suite green (218 passed). Pending upstreaming into the standalone
+memlife package.
 
 ### MF-014: `DummyEmbedder` hash vectors produce misleading cosine similarity
 **Priority:** Medium
@@ -303,6 +315,10 @@ and filtered out. This causes contradictions to be missed in small fact sets.
 ```python
 threshold = max(3, len(facts) * 0.5)
 ```
+
+**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`);
+full test suite green (218 passed). Pending upstreaming into the standalone
+memlife package.
 
 ### MF-016: Robustness and correctness pass
 **Priority:** Low
@@ -345,6 +361,25 @@ return all rows in SQLite.
 a string.
 - `gc.py run_gc()` wrapper ignores `MemoryConfig` values and uses its own
 hardcoded defaults.
+
+**Status:** Partially patched in Ingrid backend (`ingrid/memory/store.py`,
+`ingrid/journal/reflection.py`, `ingrid/agent.py`, `ingrid/server.py`,
+`ingrid/repl.py`, `ingrid/tui.py`, `ingrid/daemon/tasks.py`,
+`ingrid/models/ollama.py`). Completed items include SQL `LIKE` filtering with
+preserved match-count ranking for `search_journal()` and
+`search_episodes_by_keyword()`, serialized DB access via `_LockedConn` proxy
+around `RLock` plus `transaction()` context manager (with `_supersede_fact`
+and `trace_event` wrapped for atomicity), `run_gc()` / `run_vacuum()` split,
+corrupt checkpoint handling, `MemoryStore` context-manager support, `limit`
+validation, unified journal vector scoring, batched `consolidate_journal()`,
+`embedding_model` columns in the initial schema, broader `_normalize()`
+punctuation stripping, and the stale backup-script docstring fix. Items left
+as latent/standalone-only: `OllamaInterface.session` async-context creation
+(works in practice), `OpenAIChat` empty choices, `DummyEmbedder`,
+`SyncMemoryStore._run()`, `import_jsonl` column whitelisting, sentence-
+transformers `get_event_loop()`, MCP server cleanup, `Reflector` config
+parameter duplication, `source_episodes_json` naming, `store.py` module split,
+and README no-LLM example. Full test suite green (219 passed).
 
 ## Notes
 

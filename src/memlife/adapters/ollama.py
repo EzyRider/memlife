@@ -131,7 +131,16 @@ class OllamaChat:
         # Build the model try-list: primary model first, then fallbacks
         # with duplicates removed (MF-016: ternary precedence bug produced
         # [model, model, ...] when model was already in fallback_models).
-        models = [model] + [m for m in self.fallback_models if m != model]
+        # Fall back to self.model if the caller passed an empty string
+        # (Reflector.model_name defaults to "" — the adapter should use
+        # its own configured model in that case).
+        effective_model = model or self.model
+        if not effective_model:
+            raise ValueError(
+                "No model specified. Pass a model to chat() or set "
+                "OllamaChat(model=...) at construction time."
+            )
+        models = [effective_model] + [m for m in self.fallback_models if m != effective_model]
         last_error: Exception | None = None
 
         for m in models:

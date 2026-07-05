@@ -110,6 +110,7 @@ store.remember(task="something happened", outcome="success")
 # retrieve() is async — use SyncMemoryStore or asyncio.run():
 import asyncio
 context = asyncio.run(store.retrieve("something"))
+store.close()
 ```
 
 ## With an Embedder

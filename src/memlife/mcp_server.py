@@ -241,9 +241,9 @@ def create_server(
         """Run garbage collection on old/superseded memory data. Prunes
         superseded facts (90d), superseded journal (90d), completed runs
         (60d), metrics (30d), reflected queue entries (30d), and old
-        episodes (180d). Reclaims disk space via VACUUM."""
+        episodes (180d). Does NOT run VACUUM — use memory_vacuum separately
+        when the store is idle."""
         result = store.run_gc()
-        vacuum = store.run_vacuum()
         return (
             f"Pruned {result['total_pruned']} rows.\n"
             f"  superseded facts:   {result.get('superseded_facts', 0)}\n"
@@ -252,7 +252,16 @@ def create_server(
             f"  checkpoints:        {result.get('checkpoints', 0)}\n"
             f"  reflection metrics: {result.get('reflection_metrics', 0)}\n"
             f"  reflected queue:    {result.get('reflected_queue', 0)}\n"
-            f"  episodes:           {result.get('episodes', 0)}\n"
+            f"  episodes:           {result.get('episodes', 0)}"
+        )
+
+    @mcp.tool()
+    def memory_vacuum() -> str:
+        """Reclaim disk space by rebuilding the database file (VACUUM).
+        This needs an exclusive lock and can stall active operations —
+        run when the store is idle, not during active MCP traffic."""
+        vacuum = store.run_vacuum()
+        return (
             f"DB: {vacuum['db_size_before_mb']}MB -> {vacuum['db_size_after_mb']}MB"
         )
 
