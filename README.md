@@ -26,16 +26,16 @@ memlife solves this. Memory should be like human memory — it fades, it gets re
 ## Install
 
 ```bash
-pip install memlife --pre
+pip install memlife
 ```
 
 With adapters (optional):
 
 ```bash
-pip install memlife[ollama] --pre       # Ollama embedder + chat
-pip install memlife[openai] --pre       # OpenAI embedder + chat
-pip install memlife[sentence-transformers] --pre  # Local embeddings
-pip install memlife[mcp] --pre          # MCP server
+pip install memlife[ollama]       # Ollama embedder + chat
+pip install memlife[openai]       # OpenAI embedder + chat
+pip install memlife[sentence-transformers]  # Local embeddings
+pip install memlife[mcp]          # MCP server
 ```
 
 ## Quickstart (30 seconds, zero dependencies)
