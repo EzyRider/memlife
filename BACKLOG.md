@@ -37,9 +37,8 @@ NanoBot. Consumers currently have to enable these manually, and most don't.
 `__init__` by default, before any table creation. Make it overridable via
 config but on by default.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py` and
-`ingrid/config.py`); full test suite green (209 passed). Pending upstreaming
-into the standalone memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/store.py`, `src/memlife/config.py`).
 
 ## API Design
 
@@ -66,10 +65,8 @@ persists everything else.
 
 **Status:** Patched in Ingrid backend (`ingrid/journal/reflection.py`):
 `Reflector` is now stateless. `reflect()` accepts and returns
-`last_contradiction_scan` and `reflection_cycle`; `IngridAgent` persists these
-watermarks across passes. Existing tests updated to simulate caller
-persistence, plus a new statelessness test. Full suite green (216 passed).
-Pending upstreaming into the standalone memlife package.
+`last_contradiction_scan` and `reflection_cycle`. Full suite green.
+Upstreamed into the standalone memlife package.
 
 ## Features (core to decay thesis, not feature creep)
 
@@ -92,10 +89,8 @@ This is decay applied to contradictions, which is the memlife thesis.
 and `ingrid/memory/store.py`): contradictions are stored as journal entries
 with a `last_detected` cycle; re-detected pairs are touched instead of
 duplicated; unresolved contradictions are reinforced each pass; and stale
-contradictions older than `contradiction_retirement_cycles` (default 14,
-configurable via `Config`) are retired. Wired through `IngridAgent` and
-covered by targeted tests in `tests/test_journal.py`. Full test suite green
-(216 passed). Pending upstreaming into the standalone memlife package.
+contradictions older than `contradiction_retirement_cycles` (default 14, configurable) are retired.
+Upstreamed into the standalone memlife package (`src/memlife/_journal.py`).
 
 ### MF-005: Embedding versioning backfill on contradiction cleanup
 **Priority:** Low  
@@ -129,9 +124,8 @@ file-rebuild operation off it.
 
 **Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`):
 `run_gc()` no longer runs `VACUUM`; new `run_vacuum()` method exposed via
-CLI `ingrid vacuum`, REPL/TUI `/vacuum`, HTTP `/vacuum`, and daemon task
-`vacuum`. Full test suite green (215 passed). Pending upstreaming into the
-standalone memlife package.
+`run_gc()` no longer runs `VACUUM`; `run_vacuum()` is separate.
+Upstreamed into the standalone memlife package (`src/memlife/_gc.py`).
 
 ### MF-007: Weighted containment in `store_fact`
 **Priority:** High  
@@ -162,9 +156,8 @@ This keeps the fix zero-dependency and surgical. A future iteration may add
 `core_fact` / `detailed_fact` metadata, but that is out of scope for the first
 pass.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`,
-`ingrid/config.py`, `ingrid/agent.py`); full test suite green (214 passed).
-Pending upstreaming into the standalone memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/_facts.py`).
 
 ## Notes
 
@@ -187,8 +180,8 @@ self.fact_conflict_threshold = config.fact_conflict_threshold
 Add matching fields to `MemoryConfig` if they do not already exist. This is a
 blocking bug for any consumer using contradiction detection.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`);
-tests pass. Pending upstreaming into the standalone memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/store.py`).
 
 ### MF-009: Episode pruning missing from `run_gc()`
 **Priority:** High
@@ -212,9 +205,8 @@ self.conn.execute(
     "(SELECT id FROM episodes)")
 ```
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`,
-`ingrid/config.py`, `ingrid/agent.py`); full test suite green (210 passed).
-Pending upstreaming into the standalone memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/_gc.py`).
 
 ### MF-010: Hardcoded "Ingrid" agent name in Reflector prompt
 **Priority:** Medium
@@ -233,9 +225,8 @@ def __init__(self, ..., agent_name: str = "the agent"):
 
 Use `f"You are {self.agent_name}'s reflective faculty."` in the prompt.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`);
-full test suite green (218 passed). Pending upstreaming into the standalone
-memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/reflection.py`).
 
 ### MF-011: Hardcoded model names in Reflector and adapters
 **Priority:** Medium
@@ -250,9 +241,9 @@ confusing failures.
 raise a clear error if unset, and document the requirement in the adapter and
 `Reflector` constructors.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`
-and `ingrid/models/ollama.py`); full test suite green (218 passed). Pending
-upstreaming into the standalone memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/reflection.py`,
+`src/memlife/adapters/ollama.py`).
 
 ### MF-012: SQL injection in `import_jsonl` via column names
 **Priority:** High
@@ -277,9 +268,8 @@ query for "AI deployment" is reduced to just "deployment".
 **Fix:** Lower the minimum token length to 2, or replace the length filter
 with a proper stop-word list. At minimum, document the behavior.
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/memory/store.py`);
-full test suite green (218 passed). Pending upstreaming into the standalone
-memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/_episodes.py`).
 
 ### MF-014: `DummyEmbedder` hash vectors produce misleading cosine similarity
 **Priority:** Medium
@@ -316,9 +306,8 @@ and filtered out. This causes contradictions to be missed in small fact sets.
 threshold = max(3, len(facts) * 0.5)
 ```
 
-**Status:** Confirmed patched in Ingrid backend (`ingrid/journal/reflection.py`);
-full test suite green (218 passed). Pending upstreaming into the standalone
-memlife package.
+**Status:** Confirmed patched in Ingrid backend and upstreamed into the
+standalone memlife package (`src/memlife/reflection.py`).
 
 ### MF-016: Robustness and correctness pass
 **Priority:** Low

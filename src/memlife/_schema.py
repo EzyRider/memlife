@@ -34,6 +34,7 @@ class SchemaMixin:
                 summary TEXT DEFAULT '', tool_calls_json TEXT DEFAULT '[]',
                 created_at REAL NOT NULL,
                 embedding_json TEXT DEFAULT '',
+                embedding_model TEXT DEFAULT '',
                 is_gap_marker INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS agent_runs (
@@ -61,7 +62,8 @@ class SchemaMixin:
                 embedding_json TEXT DEFAULT '',
                 created_at REAL NOT NULL, updated_at REAL NOT NULL,
                 superseded_by TEXT DEFAULT '',
-                annotations_json TEXT DEFAULT '[]'
+                annotations_json TEXT DEFAULT '[]',
+                embedding_model TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_facts_content
                 ON facts(content);
@@ -77,6 +79,7 @@ class SchemaMixin:
                 created_at REAL NOT NULL,
                 superseded_by TEXT DEFAULT '',
                 embedding_json TEXT DEFAULT '',
+                embedding_model TEXT DEFAULT '',
                 last_detected INTEGER DEFAULT 0,
                 annotations_json TEXT DEFAULT '[]',
                 links_json TEXT DEFAULT '[]'

@@ -265,24 +265,28 @@ class JournalStore:
         tokens = self._tokenize(query)
         if not tokens:
             return self.journal_recent(limit=limit)
-        # _active_journal_sql already appends ORDER BY created_at DESC,
-        # so we just add LIMIT via parameter.
+        clauses = " OR ".join("content LIKE ?" for _ in tokens)
+        params = [f"%{t}%" for t in tokens]
         rows = self.conn.execute(
-            self._active_journal_sql(
-                "id, type, content, confidence, source_episodes_json, "
-                "private, created_at, superseded_by, embedding_json, "
-                "last_detected, annotations_json, links_json",
-                "AND type IN ('observation', 'hypothesis')"
-            ) + " LIMIT 500"
+            f"SELECT id, type, content, confidence, source_episodes_json, "
+            f"private, created_at, superseded_by, embedding_json, "
+            f"last_detected, annotations_json, links_json FROM journal "
+            f"WHERE superseded_by = '' AND type IN ('observation', 'hypothesis') "
+            f"AND ({clauses}) "
+            f"ORDER BY created_at DESC LIMIT ?",
+            (*params, limit * 4),
         ).fetchall()
         entries = [self._journal_from_row(r) for r in rows]
+        n_tokens = max(1, len(tokens))
         scored = []
         for j in entries:
-            text = j.content.lower()
-            hits = sum(1 for t in tokens if t in text)
+            hay = j.content.lower()
+            hits = sum(1 for t in tokens if t in hay)
             if hits > 0:
-                j._relevance = hits / len(tokens)  # type: ignore[attr-defined]
-                scored.append((j._relevance, j))  # type: ignore[attr-defined]
+                j._match_score = hits  # type: ignore[attr-defined]
+                j._relevance = hits / n_tokens  # type: ignore[attr-defined]
+                j._text_score = hits / n_tokens  # type: ignore[attr-defined]
+                scored.append((j._match_score, j))
         scored.sort(key=lambda t: t[0], reverse=True)
         return [j for _, j in scored[:limit]]
 

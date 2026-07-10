@@ -153,7 +153,7 @@ class GCMixin:
             (cutoff_episodes,),
         )
         pruned["episodes"] = cur.rowcount
-        self.conn.execute(
+        cur = self.conn.execute(
             "DELETE FROM episode_tools WHERE episode_id NOT IN "
             "(SELECT id FROM episodes)"
         )

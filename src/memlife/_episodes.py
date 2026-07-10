@@ -313,10 +313,17 @@ class EpisodeStore:
         tokens = self._tokenize(query)
         if not tokens:
             return self.recent(limit=limit)
+        clauses = " OR ".join("(task LIKE ? OR summary LIKE ?)" for _ in tokens)
+        params: list[str] = []
+        for t in tokens:
+            like = f"%{t}%"
+            params.extend([like, like])
         rows = self.conn.execute(
-            "SELECT id, task, outcome, summary, tool_calls_json, "
-            "created_at, embedding_json, is_gap_marker FROM episodes "
-            "ORDER BY created_at DESC LIMIT 500"
+            f"SELECT id, task, outcome, summary, tool_calls_json, "
+            f"created_at, embedding_json, is_gap_marker FROM episodes "
+            f"WHERE {clauses} "
+            f"ORDER BY created_at DESC LIMIT ?",
+            (*params, limit * 4),
         ).fetchall()
         episodes = [Episode.from_row(tuple(r)) for r in rows]
         scored = []
@@ -324,6 +331,7 @@ class EpisodeStore:
             text = (ep.task + " " + (ep.summary or "")).lower()
             hits = sum(1 for t in tokens if t in text)
             if hits > 0:
+                ep._match_score = hits  # type: ignore[attr-defined]
                 scored.append((hits, ep))
         scored.sort(key=lambda t: t[0], reverse=True)
         return [ep for _, ep in scored[:limit]]

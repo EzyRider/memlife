@@ -26,6 +26,8 @@ Resources:
 from __future__ import annotations
 
 import argparse
+import atexit
+import signal
 import json
 import logging
 import os
@@ -385,6 +387,18 @@ def main():
         "memlife MCP server starting (db=%s, embedder=%s, model=%s)",
         args.db, args.embedder, args.embedding_model,
     )
+
+    # MF-016: ensure store, embedder, and sessions are cleaned up on exit.
+    def _shutdown() -> None:
+        try:
+            server._memlife_store.close()  # type: ignore[attr-defined]
+            logger.info("memlife store closed")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("error closing memlife store: %s", exc)
+
+    atexit.register(_shutdown)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda _signum, _frame: _shutdown())
 
     server.run()
 

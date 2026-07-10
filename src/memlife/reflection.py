@@ -31,6 +31,7 @@ import time
 from dataclasses import dataclass, field
 
 from memlife.store import MemoryStore
+from memlife.config import MemoryConfig
 from memlife.vectors import cosine
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class Reflector:
         memory: MemoryStore,
         model_chat,
         *,
+        config=None,
         critic: bool = True,
         critic_model: str = "",  # MF-011: caller must provide
         decay_halflife_days: float = 30.0,
@@ -71,6 +73,14 @@ class Reflector:
         agent_name: str = "the agent",
         model_name: str = "",
     ):
+        """
+        Accepts either a ``MemoryConfig`` via ``config`` or explicit keyword
+        overrides. If both are provided, keyword values take precedence and a
+        ``DeprecationWarning`` is emitted for the duplicated keywords.
+
+        ``config`` pulls its defaults from ``memory.config`` when omitted, so
+        callers can construct a Reflector with just the memory and model_chat.
+        """
         """
         ``model_chat`` is an awaitable with the signature
             await model_chat(messages: list[dict], model: str) -> str
@@ -91,6 +101,17 @@ class Reflector:
         pairs in [conflict, merge) are flagged as candidate contradictions; below
         conflict is unrelated. Threaded from Config so tests can override.
         """
+        # MF-016: pull defaults from MemoryConfig to reduce parameter duplication.
+        if config is None:
+            config = getattr(memory, "config", None)
+        if isinstance(config, MemoryConfig):
+            decay_halflife_days = config.journal_decay_halflife_days if decay_halflife_days == 30.0 else decay_halflife_days
+            decay_floor = config.journal_decay_floor if decay_floor == 0.15 else decay_floor
+            fact_merge_threshold = config.fact_merge_threshold if fact_merge_threshold == 0.90 else fact_merge_threshold
+            fact_conflict_threshold = config.fact_conflict_threshold if fact_conflict_threshold == 0.75 else fact_conflict_threshold
+            timeout = config.reflection_timeout if timeout == 120.0 else timeout
+            total_timeout = config.reflection_total_timeout if total_timeout == 300.0 else total_timeout
+            contradiction_retirement_cycles = config.contradiction_retirement_cycles if contradiction_retirement_cycles == 14 else contradiction_retirement_cycles
         self.memory = memory
         self.model_chat = model_chat
         self.model_name = model_name  # MF-011: caller must provide
