@@ -58,9 +58,12 @@ be explored later if hosted demand justifies it.
 
 - `MemoryConfig.namespace: str = "_default"`
 - `MemoryConfig.db_path_for(namespace: str) -> str` helper
-- `MemoryStore.list_namespaces()` — scan configured directory for `memlife_*.db`
-- `MemoryStore.switch_namespace(name: str) -> MemoryStore` — returns a new store
-  pointing at the namespaced DB, sharing the embedder where safe
+- `MemoryStore.list_namespaces()` — scan configured directory for `memlife_*.db`.
+  This scan is heuristic: files renamed outside the tool will appear as namespaces.
+- `MemoryStore.switch_namespace(name: str) -> MemoryStore` — creates and returns a
+  **new** store pointing at the namespaced DB. The original store is left open
+  and untouched; callers must close it if it is no longer needed. The namespace
+  is validated before the new store is constructed.
 
 **Namespace validation and safety:**
 
@@ -192,8 +195,10 @@ store.record_reflection_pass(
     model_used="qwen3.5:cloud",
 )
 
-audit = store.reflection_audit(limit=10)
-# returns structured dict with per-pass episodes, proposals, critic decisions
+audit = store.reflection_audit(limit=10, since=None, model_used=None)
+# returns structured dict with per-pass episodes, proposals, critic decisions.
+# ``since`` filters by pass timestamp; ``model_used`` filters by the model that
+# generated the pass.
 
 # User correction becomes a first-class memory
 store.record_user_correction(
@@ -213,7 +218,9 @@ store.record_user_correction(
   oldest passes on insert so the table does not grow unbounded.
 3. **`reflection_audit()` API:** paginated retrieval of past passes with enough
   detail to debug quality regressions. Include per-proposal `critic_score` and
-  aggregate score distribution for the pass.
+  aggregate score distribution for the pass. Add lightweight filtering: at least
+  ``since`` (timestamp) and ``model_used`` so users can compare cloud vs local
+  reflections.
 4. **User correction entries:** a new journal type `user_correction` that
   supersedes the incorrect belief. Corrections are retrieved into future
   reflection prompts with high base confidence and explicit weighting.
@@ -234,6 +241,8 @@ store.record_user_correction(
 
 - A user correction supersedes the target journal entry
 - A subsequent reflection pass includes the correction in context
+- After a correction, the next reflection pass does **not** regenerate the same
+  wrong belief
 - `reflection_audit(limit=10)` returns passes in reverse chronological order
 - `reflection_audit()` returns the last N passes with kept/dropped breakdowns
 - Retention pruning removes the oldest pass when the cap is exceeded
@@ -289,7 +298,8 @@ reflection pass frequency, and backend latency.
 
 - 0.5.0: `use_sqlite_vec` and `use_binary_vectors` still accepted but emit
   `DeprecationWarning`, mapping to the new `vector_backend` enum.
-- 0.6.0: remove the boolean flags entirely.
+- 0.6.0: boolean flags continue to warn but are formally deprecated.
+- 0.7.0: remove the boolean flags entirely.
 
 ---
 
