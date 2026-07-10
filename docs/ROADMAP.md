@@ -109,67 +109,89 @@ be explored later if hosted demand justifies it.
 
 ---
 
-### 2. sqlite-vec as a first-class vector backend
+### 2. Vector backend as an ABC
 
-**Goal:** Move sqlite-vec from a silent fallback to a real indexed vector backend
-that users can choose and trust.
+**Goal:** Make the vector backend a real pluggable layer instead of boolean
+flags and scattered ad-hoc checks. sqlite-vec becomes one of several first-class
+implementations, not a special case.
 
-**Current state:** `MemoryConfig.use_sqlite_vec` exists, but the path is
-fallback-only and not well tested in CI (sqlite-vec is an optional dependency).
+**Current state:** `vec_backend.py` is a module of free functions gated by
+`use_sqlite_vec` and `use_binary_vectors`. Promoting sqlite-vec currently
+requires a multi-file refactor plus a deprecation dance.
 
 **Design:**
 
 ```python
+from memlife.vectors.backends import JsonVectorBackend, SqliteVecBackend
+
 cfg = MemoryConfig(
     db_path="./memlife.db",
-    vector_backend="sqlite-vec",   # "json" | "sqlite-vec" | "binary"
+    vector_backend=SqliteVecBackend(dim=768),
 )
 ```
 
-Deprecate `use_sqlite_vec: bool` and `use_binary_vectors: bool` in favor of a
-single `vector_backend: str` enum. Keep old flags as aliases for one release.
+The store holds a single `VectorBackend` instance. All vector operations go
+through it: `store(kind, item_id, vec)`, `search(kind, query_vec, limit)`,
+`delete(kind, item_id)`, `count(kind)`, `dim`. The four content tables
+(episodes, facts, journal) stay exactly as they are; only the vector storage
+and search mechanism is abstracted.
+
+Implementations:
+
+- `JsonVectorBackend` — current default; stores vectors in `embedding_json`.
+- `BinaryVectorBackend` — compact binary serialization.
+- `SqliteVecBackend` — proper virtual-table vector search.
+
+The boolean flags `use_sqlite_vec` and `use_binary_vectors` are removed outright
+in 0.5.0. This is a breaking change relative to the flags, but the public
+`MemoryStore` API is unchanged.
 
 **Work items:**
 
-1. **Backend enum:** use `VectorBackend` enum (or `Literal["json", "sqlite-vec", "binary"]`),
-  not a plain `str`, for validation and IDE support.
-2. **Auto-detection:** try to load `sqlite_vec` at runtime. If the user did
-  **not** explicitly request `sqlite-vec`, fall back to JSON with a logged
-  warning. If the user explicitly set `vector_backend="sqlite-vec"` and the
-  package is not installed, raise a clear `RuntimeError` instead of silently
-  falling back.
-3. **Schema management:** create virtual tables per embedding kind
-  (`vec_episodes`, `vec_facts`, `vec_journal`) on first connection.
-4. **Dimension guards:** store expected dimension per table; reject mismatched
-  vectors with a clear error instead of silent corruption. Provide a way to
-  drop/recreate virtual tables and re-backfill when the embedding model changes.
-5. **Explicit migration:** switching an existing DB to sqlite-vec does **not**
-  auto-backfill. `backfill_embeddings()` is the user-facing opt-in; it logs
-  progress and can be resumed.
-6. **Backfill integration:** `backfill_embeddings()` populates sqlite-vec
-  tables when active.
-7. **CI:** add a parameterized test fixture that runs the vector recall suite
-  against all three backends, plus a job that installs `memlife[sqlite-vec]`.
-8. **Benchmarks:** add a small script comparing recall latency and accuracy
-  across JSON, binary, and sqlite-vec backends on synthetic data.
+1. **ABC definition:** `src/memlife/vectors/backend.py` with the `VectorBackend`
+  abstract base class and a `VectorBackendError` exception.
+2. **Three implementations:** `JsonVectorBackend`, `BinaryVectorBackend`,
+  `SqliteVecBackend` in `src/memlife/vectors/backends/`.
+3. **Backend owns dimension:** `dim` is a required attribute. `store()`
+  rejects mismatched vectors at the interface level instead of in scattered
+  checks across `_embeddings.py`.
+4. **Auto-detection for sqlite-vec:** if the user passes `SqliteVecBackend`
+  but `sqlite-vec` is not installed, raise a clear `RuntimeError`. If no backend
+  is specified, default to `JsonVectorBackend`.
+5. **Schema management:** each backend manages its own tables. sqlite-vec
+  creates virtual tables (`vec_episodes`, `vec_facts`, `vec_journal`) on
+  first connection. JSON/binary use the existing columns.
+6. **Embedding cache:** add a content-addressable cache keyed on
+  `(model_name, sha256(text)) -> vector`. This makes model swaps cheap,
+  repeated text instant, and sqlite-vec backfills a metadata operation rather
+  than a re-embedding marathon. Stored in a small `embedding_cache` table.
+7. **Explicit migration:** switching an existing DB backend does **not**
+  auto-backfill. `backfill_embeddings()` is the user-facing opt-in; it uses the
+  cache where possible and logs progress.
+8. **CI:** parameterize vector recall tests across all three backends. Add a
+  job that installs `memlife[sqlite-vec]`.
+9. **Benchmarks:** add a small script comparing recall latency and accuracy
+  across JSON, binary, and sqlite-vec on synthetic data.
 
 **Files to touch:**
 
-- `src/memlife/vec_backend.py` — expand to a proper backend manager
-- `src/memlife/_embeddings.py` — route serialization through chosen backend
-- `src/memlife/_schema.py` — create/drop virtual tables
-- `src/memlife/config.py` — add `vector_backend`, deprecate booleans
+- `src/memlife/vectors/backend.py` — new ABC
+- `src/memlife/vectors/backends/*.py` — implementations
+- `src/memlife/vec_backend.py` — migrate current helpers, then remove once migrated
+- `src/memlife/_embeddings.py` — route everything through the backend instance
+- `src/memlife/_schema.py` — backend-specific table creation, plus `embedding_cache`
+- `src/memlife/config.py` — `vector_backend: VectorBackend` field
 - `pyproject.toml` — add `sqlite-vec` extra and update `all` extra
-- `tests/test_sqlite_vec.py` — expand coverage; parameterize vector recall tests
+- `tests/test_vectors_backends.py` — new parameterized backend tests
 - `docs/vector-backends.md` — new comparison doc
 
 **Verification:**
 
-- All vector recall tests pass with each backend
-- Parameterize existing vector recall tests with a `vector_backend` fixture
-- Backfill produces correct vectors in the active backend
-- Dimension mismatch raises a clear error
-- Explicit `vector_backend="sqlite-vec"` without the package installed raises
+- All vector recall tests pass with each backend via a parameterized fixture
+- Dimension mismatch raises `VectorBackendError` from the backend, not a generic assertion
+- Backfill uses the embedding cache where possible
+- Model swap is cheap because the cache already holds vectors for the new model
+- `SqliteVecBackend` without `sqlite-vec` installed raises a clear error
 - CI runs sqlite-vec job
 
 ---
@@ -209,33 +231,41 @@ store.record_user_correction(
 
 **Work items:**
 
-1. **Reflection pass persistence:** store the raw reflection output, critic
-  scores, and final kept/dropped lists. Because raw output can be large,
-  either (a) compress it as zlib/gzip into a BLOB column, or (b) keep full
-  detail for the most recent `reflection_pass_retention` passes and summarize
-  older ones (drop raw proposals, keep counts and aggregate scores).
-2. **Retention cap:** add `reflection_pass_retention: int = 100` config. Prune
+1. **Pipeline refactor (prerequisite):** break `Reflector._reflect_inner()`
+  into named, independently testable stages that take and return a context dict:
+  `gather`, `build_prompt`, `call_model`, `parse`, `detect_contradictions`,
+  `critique`, `store`, `consolidate`, `record_metrics`. The default pipeline is
+  the list of stages; `reflect()` runs them in order and stops early if a
+  stage sets `ctx["abort"]`. This makes every stage unit-testable and MF-003
+  (reflector lifecycle) easier: stateful watermarks live in the context or are
+  read from the store by the relevant stage.
+2. **Reflection pass persistence:** add `persist_pass` and
+  `inject_corrections` as pipeline stages. Store raw reflection output, critic
+  scores, and kept/dropped lists. Because raw output can be large, either (a)
+  compress it as zlib/gzip into a BLOB column, or (b) keep full detail for the
+  most recent `reflection_pass_retention` passes and summarize older ones.
+3. **Retention cap:** add `reflection_pass_retention: int = 100` config. Prune
   oldest passes on insert so the table does not grow unbounded.
-3. **`reflection_audit()` API:** paginated retrieval of past passes with enough
+4. **`reflection_audit()` API:** paginated retrieval of past passes with enough
   detail to debug quality regressions. Include per-proposal `critic_score` and
-  aggregate score distribution for the pass. Add lightweight filtering: at least
-  ``since`` (timestamp) and ``model_used`` so users can compare cloud vs local
+  aggregate score distribution. Add lightweight filtering: at least ``since``
+  (timestamp) and ``model_used`` so users can compare cloud vs local
   reflections.
-4. **User correction entries:** a new journal type `user_correction` that
+5. **User correction entries:** a new journal type `user_correction` that
   supersedes the incorrect belief. Corrections are retrieved into future
   reflection prompts with high base confidence and explicit weighting.
-5. **Critic calibration:** expose `critic_score` per proposed entry; let users
+6. **Critic calibration:** expose `critic_score` per proposed entry; let users
   tune thresholds via `MemoryConfig`.
-6. **Reflection prompt injection:** include recent `user_correction` entries in
+7. **Reflection prompt injection:** include recent `user_correction` entries in
   the reflector prompt so the same mistake is not repeated.
 
 **Files to touch:**
 
+- `src/memlife/reflection.py` — pipeline refactor, persist pass, read corrections
 - `src/memlife/_schema.py` — new `reflection_passes` table
 - `src/memlife/_journal.py` — correction APIs
-- `src/memlife/reflection.py` — persist pass details, read corrections
 - `src/memlife/config.py` — critic threshold tuning
-- `tests/test_reflection.py` — audit and correction tests
+- `tests/test_reflection.py` — pipeline stage tests, audit and correction tests
 
 **Verification:**
 
@@ -284,9 +314,12 @@ optional event stream:
 store.metrics()  # returns structured counters: recall, embedding health, GC
 ```
 
-For 0.5.0 this is read-only and lightweight. Later releases can add callbacks
-or async event streams for hosted users who want to monitor namespace growth,
-reflection pass frequency, and backend latency.
+For 0.5.0 this is read-only and lightweight. In 0.6.0/0.7.0, `store.metrics()`
+can evolve into a lightweight synchronous event bus so reactive features
+(gap markers, tool indexing, contradiction detection, metrics recording) can
+register as subscribers instead of hard-coding call sites. That is the natural
+path to multi-agent attribution and sync/replication without bloating the core
+0.5.0 release.
 
 ### Documentation split
 
@@ -294,12 +327,11 @@ reflection pass frequency, and backend latency.
 - `docs/vector-backends.md` — comparison of JSON, binary, and sqlite-vec
 - `docs/reflection-audit.md` — reflection transparency and correction usage
 
-### Deprecation timeline
+### Breaking changes for 0.5.0
 
-- 0.5.0: `use_sqlite_vec` and `use_binary_vectors` still accepted but emit
-  `DeprecationWarning`, mapping to the new `vector_backend` enum.
-- 0.6.0: boolean flags continue to warn but are formally deprecated.
-- 0.7.0: remove the boolean flags entirely.
+- `use_sqlite_vec` and `use_binary_vectors` are removed outright. They are
+  replaced by the `vector_backend` field accepting a `VectorBackend` instance.
+  The public `MemoryStore` API is otherwise unchanged.
 
 ---
 
@@ -365,7 +397,7 @@ These are deliberately out of scope to keep the release shippable:
 | ID | Decision | Default | Notes |
 |----|----------|---------|-------|
 | R1 | Namespace strategy | Separate DB files | Keeps schema and migration simple |
-| R2 | Vector backend config | `VectorBackend` enum | Replaces boolean flags; string values accepted as aliases for one release |
+| R2 | Vector backend config | `VectorBackend` ABC | Replaces boolean flags; backend owns dimension and storage |
 | R3 | Multi-agent scope | Out of 0.5.0 | Single-agent-per-namespace only |
 | R4 | Corrections as journal entries | Yes | Reuse existing supersession/retirement machinery |
 | R5 | Sync subsystem | Separate package | Avoid bloating core memlife |
