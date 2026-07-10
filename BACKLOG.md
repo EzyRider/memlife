@@ -391,280 +391,135 @@ and README no-LLM example. Full test suite green (219 passed).
 - MF-009 is the decay thesis extended to episodes — also core, not creep.
 - All items should be verified against Ingrid and Nano as testbeds before release.
 
----
+------
 
-# memlife V2 Backlog
+# memlife V2 Status
 
-Items derived from a critical read of Mnemosyne (github.com/mnemosyne-oss/mnemosyne),
-organised into two buckets:
+All V2 items were implemented in memlife 0.4.0b0–0.4.1b0 and are shipped in
+`main`. The original design notes are preserved below as a status record, not as
+pending work.
 
-- **Core:** extends the four-layer model without new dependencies. Works in
-  zero-dependency / no-LLM mode.
-- **Infrastructure:** adds optional capabilities, often with new dependencies.
-  These must be opt-in and degrade gracefully.
+- **Core V2:** complete and tested.
+- **Infrastructure V2:** complete and opt-in.
+- **Bug fixes MF-001..MF-016:** complete and upstreamed.
+- **Current version:** 0.4.1b0
+- **Test status:** 118 passed
+
+Remaining architectural work: `store.py` mixin refactor (see
+`docs/refactor-store-split.md`).
 
 ## V2 Core (no new dependencies)
 
-### MV2-001: Tiered episodic degradation
-**Priority:** High
+### MV2-001: Tiered episodic degradation — DONE
+Implemented via per-episode-type halflives in `MemoryConfig`:
+- `episode_tool_success_halflife_days=21.0`
+- `episode_failure_halflife_days=3.0`
+- `episode_observation_halflife_days=1.0`
 
-Mnemosyne keeps episodic memories at full fidelity, then compresses them
-through degradation tiers over time. memlife currently only has confidence
-decay and GC. Add explicit content tiers for episodes:
+Episode properties `is_success`, `is_failure`, and `has_tool_calls` select the
+correct tier during retrieval. See `tests/test_tiered_decay.py`.
 
-- Tier 1: full episode text.
-- Tier 2 (e.g. 30 days): LLM-summarised episode, 0.5× recall weight.
-- Tier 3 (e.g. 180 days): key-signal extraction, 0.25× recall weight.
+### MV2-002: Hybrid retrieval scoring — DONE
+Unified score is `relevance × confidence × recency`, with relevance blended
+from vector, text, source, and veracity signals. Weights are exposed in
+`MemoryConfig`:
+- `recall_vector_weight=0.5`
+- `recall_text_weight=0.3`
+- `recall_source_weight=0.2`
+- `recall_veracity_weight=0.05`
 
-The actual compression must be optional and fallback-aware: use the injected
-`model_chat` when available; otherwise fall back to a keyword/signal extract
-so no-LLM mode keeps working.
+Signals are normalised per query. See `src/memlife/retrieval.py` and
+`tests/test_retrieval.py`.
 
-**Why core:** it extends the Decay/Prune layer, not a new layer.
+### MV2-003: Temporal triple store — DONE
+`temporal_triples` table with methods:
+- `store.store_fact_triple(...)`
+- `store.current_truth(subject, predicate)`
+- `store.truth_as_of(subject, predicate, as_of)`
+- `store.triples_for_fact(fact_id)`
+- `store.expire_triples_for_fact(fact_id)`
 
-### MV2-002: Hybrid retrieval scoring
-**Priority:** High
+See `tests/test_temporal_triples.py`.
 
-Mnemosyne's recall blends vector, FTS, and importance scores. memlife's
-unified score is `relevance × confidence × recency`, where relevance is
-currently opaque. Decompose relevance into:
+### MV2-004: AnnotationStore for multi-valued metadata — DONE
+`annotations` table and methods:
+- `store.annotate_fact(fact_id, kind)`
+- `store.annotate_journal(journal_id, kind)`
 
-- `relevance = 0.5*vector + 0.3*fts + 0.2*source_weight`
-- normalised per query.
+`Episode`, `Fact`, and `JournalEntry` expose `.annotations`. See
+`tests/test_annotations.py`.
 
-Expose the formula and weights in `MemoryConfig` so callers can tune them.
+### MV2-005: Veracity-weighted recall — DONE
+Veracity bonus applied during retrieval; current temporal triples boost a
+fact's veracity, expired triples do not. Configurable via
+`recall_veracity_weight`. See `tests/test_veracity.py`.
 
-**Why core:** improves existing retrieval without new dependencies.
+### MV2-006: Recall path diagnostics — DONE
+`retrieve(query, debug=True)` returns a structured result with per-candidate
+`why` explanations. `store.recall_stats()` exposes path counters. See
+`tests/test_recall_diagnostics.py`.
 
-### MV2-003: Temporal triple store
-**Priority:** Medium
+### MV2-007: Layer-aware configurable decay — DONE
+Per-layer halflives in `MemoryConfig`:
+- `fact_decay_halflife_days=365.0`
+- `episode_decay_halflife_days=7.0`
+- `journal_decay_halflife_days=30.0`
 
-Mnemosyne separates temporal triples (single current truth) from
-append-only annotations. memlife handles truth revision via `memory_revise`
-and supersession, but the time axis is implicit. Add an optional
-`temporal_triples` table:
+Decay floors: `fact_decay_floor=0.1`, `journal_decay_floor=0.15`.
 
-- `subject`, `predicate`, `object`, `valid_from`, `valid_until`, `fact_id`.
-- `memory_revise` writes a new triple and closes the previous one.
-- Queries can ask for current truth or as-of-date.
+### MV2-008: Temporal gap markers — DONE
+`gap_marker_threshold_hours=24.0` triggers synthetic gap-marker episode
+insertion when a meaningful time gap is detected. See
+`tests/test_gap_markers.py`.
 
-Default to the existing facts table if unused; no breaking change.
+### MV2-009: Journal as belief/opinion network — DONE
+Journal entries support:
+- `belief_type` (`user_preference`, `world_model`, `agent_self`,
+  `relationship`)
+- `source_episodes` / `source_facts` provenance
+- `link_journal_entries(..., relation, strength)` for belief-network edges
+- retirement / supersession semantics
 
-**Why core:** strengthens the Facts layer without new dependencies.
-
-### MV2-004: AnnotationStore for multi-valued metadata
-**Priority:** Medium
-
-Mnemosyne uses an append-only `AnnotationStore` for entity mentions,
-extracted facts, dates, and sources. memlife episodes store tool calls as
-JSON; annotations would generalise this.
-
-Add an `annotations` table: `(memory_id, kind, value, source, confidence)`.
-Use it for:
-
-- entity mentions
-- extracted dates
-- source references
-- tool outcomes
-
-Search episodes/facts by annotation. Keep the existing schema intact.
-
-**Why core:** enriches Episodes and Facts; no new dependencies.
-
-### MV2-005: Veracity-weighted recall
-**Priority:** Medium
-
-Mnemosyne tags every memory with `stated` / `inferred` / `tool` / `imported`
-/ `unknown` and uses it as a recall multiplier. memlife already has `source`
-(`user`, `agent`, `journal`) and confidence capping.
-
-Map sources to veracity weights and apply a small multiplier during
-retrieval, keeping confidence as the primary signal. For example:
-
-- `user`: 1.0
-- `agent`: 0.9
-- `tool`: 0.95
-- `journal`: 0.85
-- `imported`: 0.8
-
-Make weights configurable.
-
-**Why core:** refines confidence handling; no new dependencies.
-
-### MV2-006: Recall path diagnostics
-**Priority:** Low
-
-Mnemosyne tracks how often recall falls back to weak substring scanning vs.
-FTS/vector. memlife already exposes `/stats` and `/health`; add recall
-path counters:
-
-- vector hits
-- FTS hits
-- fallback (substring) hits
-- empty results
-
-Surface in `memlife://stats` or a new `memlife://recall-diagnostics`
-resource. Keep it lightweight and optional.
-
-**Why core:** operational visibility; no new dependencies.
-
-### MV2-007: Layer-aware configurable decay
-**Priority:** Medium
-**Source:** OpenClaw onboarding review, July 2026
-
-The recency term in `vectors.py` uses a single hard-coded decay constant
-for all memory layers. Over time this flattens episodic detail and
-long-term identity facts into the same forgetting curve, and it lets a
-low-confidence new fact outrank a high-confidence old fact simply because
-it is recent.
-
-**Fix:** Move decay parameters into `MemoryConfig` and make
-`recency_weight()` layer-aware:
-
-- `fact_decay_halflife` — slow (default ~1 year) for identity-grade facts.
-- `episode_decay_halflife` — fast (default ~7 days) for transient events.
-- `journal_decay_halflife` — medium (default ~30 days) for inferred
-  beliefs.
-- `confidence_decay_floor` — above this threshold, decay is slowed so
-  high-confidence truths do not erode as quickly.
-
-Keep the existing `relevance × confidence × recency` formula; only expose
-the decay constants and add the confidence floor. This is a tuning change,
-not a new dependency.
-
-**Why core:** refines the existing Decay layer; no new dependencies.
-
-### MV2-008: Temporal gap markers
-**Priority:** Low
-
-From Mastra's Observational Memory: insert a lightweight marker when a
-meaningful time gap passes between messages in a thread (default ~10
-minutes, configurable). The marker is stored as a transient episode entry
-and helps both the agent and downstream consumers see that a conversation
-resumed after a pause.
-
-Use cases:
-
-- Anchor observations to real-world time ("User asked about deployment
-  after a 2-day gap").
-- Improve temporal reasoning without building a full timeline parser.
-- Give UI consumers a cheap timeline hint.
-
-Keep the implementation minimal: detect on episode insert, write a
-synthetic episode with `kind="gap_marker"`, and include it in recall only
-when the query has temporal cues.
-
-**Why core:** extends the Episodes layer; no new dependencies.
-
-### MV2-009: Journal as belief/opinion network
-**Priority:** Medium
-
-From Hindsight's four-network model: treat the journal layer less as a
-private diary and more as a first-class belief network. Each journal entry
-represents an inferred model of the user, world, or agent self, with
-confidence and provenance.
-
-Design exploration:
-
-- Add optional `belief_type` to journal entries: `user_preference`,
-  `world_model`, `agent_self`, `relationship`.
-- Track `evidence_episodes` and `evidence_facts` as provenance.
-- Allow confidence updates and explicit retirement when evidence shifts.
-- Surface beliefs during reflection as structured "what I believe" context,
-  separate from raw facts.
-
-This does not replace existing journal entries; it gives them a schema
-when callers opt in. The default journal remains free-form.
-
-**Why core:** strengthens the Journal layer without new dependencies.
+See `tests/test_belief_network.py`.
 
 ## V2 Infrastructure (opt-in, may add dependencies)
 
-### MV2-I001: sqlite-vec native vector backend
-**Priority:** High
+### MV2-I001: sqlite-vec native vector backend — DONE
+`vec_backend.py` auto-detects `sqlite-vec`; `MemoryConfig.use_sqlite_vec`
+controls it. Falls back to JSON embeddings when unavailable. See
+`tests/test_sqlite_vec.py`.
 
-memlife stores embeddings as JSON in SQLite. Mnemosyne uses `sqlite-vec`
-virtual tables when available, with JSON/numpy fallbacks. Add an optional
-`sqlite-vec` backend:
+### MV2-I002: Binary vector compression — DONE
+`binary_vectors.py` provides `binarize`, `debinarize`, `hamming_distance`,
+`hamming_similarity`. Binary embeddings are stored as `binary:dim:base64` and
+decoded in `models.py`. See `tests/test_binary_vectors.py`.
 
-- Use virtual tables for vector search when the extension is available.
-- Fall back to JSON embeddings if not.
-- Add dimension guards and backfill on model change.
+### MV2-I003: Structured MEMORIA-style extraction — DONE
+`memorias.py` provides regex-based extraction of facts, preferences,
+instructions, timelines, and KG triples, plus `persist_extraction()` to store
+them. Controlled by `MemoryConfig.memorias_extraction`. See
+`tests/test_memorias.py`.
 
-Package as `memlife[sqlite-vec]` or auto-detect at runtime.
-
-**Why infrastructure:** adds a dependency/extension but is fully optional.
-
-### MV2-I002: Binary vector compression
-**Priority:** Medium
-
-Mnemosyne's MIB binarization compresses 384-dim float32 vectors to 48 bytes
-and uses Hamming distance. Add an optional `BinaryVectorStore` adapter:
-
-- Use when storage is constrained or `sqlite-vec` is unavailable.
-- Keep float32 as the default for accuracy.
-- Allow per-store selection via config.
-
-**Why infrastructure:** storage/performance optimisation; optional.
-
-### MV2-I003: Structured MEMORIA-style extraction
-**Priority:** Medium
-
-Mnemosyne v3 extracts structured facts into `memoria_facts`,
-`memoria_timelines`, `memoria_instructions`, `memoria_preferences`, and
-`memoria_kg`. memlife's reflection already produces facts and journal
-entries. Add optional structured extraction during reflection:
-
-- facts, instructions, preferences, timelines, kg triples.
-- Regex-based always-on path for no-LLM mode.
-- Optional LLM-based path when `model_chat` is available.
-
-Store in the existing facts/journal/annotations tables; do not create a
-separate "MEMORIA" layer.
-
-**Why infrastructure:** richer extraction, but requires an LLM for the full
-path. Regex fallback keeps it usable without one.
-
-### MV2-I004: Polyphonic recall (optional plugin)
-**Priority:** Low
-
-Mnemosyne has a polyphonic recall mode that fuses vector, graph, fact, and
-temporal voices via RRF. memlife's unified score is intentionally simple.
-Offer polyphonic recall as an optional retrieval strategy:
-
-- Configurable voices.
-- RRF fusion.
-- Default remains unified score.
-
-**Why infrastructure:** significant complexity; should be opt-in only.
+### MV2-I004: Polyphonic recall — DONE
+`polyphonic.py` implements reciprocal-rank-fusion across retrieval voices.
+`MemoryConfig.use_polyphonic_recall` toggles it; default unified score is
+unchanged. See `tests/test_polyphonic.py`.
 
 ## V2 Non-goals
 
-These Mnemosyne features are deliberately not on the backlog because they
-either duplicate existing memlife layers or pull the design in a different
-direction:
+Unchanged — deliberately out of scope:
 
-- **Working-memory auto-injection:** memlife keeps working memory in the
-  agent's message list, not the memory store. Moving it in would blur the
-  agent/memory boundary.
-- **L3 Persona layer:** memlife's journal already shapes tone privately. A
-  separate persona tier would create two sources of truth about agent belief.
-- **Scratchpad:** temporary reasoning workspace is the agent's context, not a
-  memory-layer concern.
-- **Sync subsystem:** useful, but separate from the memory lifecycle. Should
-  be a separate package or optional module.
-- **Multi-agent identity / collaborative attestation:** memlife is
-  single-agent by design. Adding author/validator chains is out of scope
-  unless the product scope changes.
-- **Built-in local LLM consolidation chain:** memlife's reflection uses an
-  injected `model_chat`. Adding a built-in local GGUF chain would add heavy
-  dependencies and break the zero-dependency promise.
+- Working-memory auto-injection
+- L3 Persona layer
+- Scratchpad
+- Sync subsystem
+- Multi-agent identity / collaborative attestation
+- Built-in local LLM consolidation chain
 
 ## Notes
 
-- Core items must keep the zero-dependency contract: DummyEmbedder +
-  DummyChat must still run store/retrieve/decay/GC without any new packages.
-- Infrastructure items must degrade gracefully when their dependency is
-  absent.
-- The V2 list is additive to the MF-001..MF-005 bug-fix backlog above; fix
-  the bugs before starting V2 architecture work.
+- Zero-dependency contract preserved: DummyEmbedder + DummyChat run the full
+  lifecycle.
+- Infrastructure features degrade gracefully when dependencies are absent.
+- The MF-001..MF-016 bug fixes are upstreamed and live.
+- Remaining work: `store.py` mixin refactor.

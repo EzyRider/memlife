@@ -1,0 +1,285 @@
+"""Create and migrate the SQLite schema.
+
+Extracted from store.py as part of the mixin refactor.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+# Maximum confidence allowed for a stored fact. 1.0 is reserved: it implies
+# immutable certainty, which blocks revision. Cap below 1.0 so every fact
+# remains updateable.
+MAX_FACT_CONFIDENCE = 0.99
+
+
+class SchemaMixin:
+    """Create and migrate the SQLite schema."""
+
+    db_path: str
+    config: object
+    _conn: object
+    conn: object
+    _lock: object
+
+    def _init_schema(self) -> None:
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS episodes (
+                id TEXT PRIMARY KEY, task TEXT NOT NULL,
+                outcome TEXT NOT NULL DEFAULT 'running',
+                summary TEXT DEFAULT '', tool_calls_json TEXT DEFAULT '[]',
+                created_at REAL NOT NULL,
+                embedding_json TEXT DEFAULT '',
+                is_gap_marker INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                id TEXT PRIMARY KEY, task TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                created_at REAL NOT NULL, completed_at REAL,
+                model_used TEXT, total_tokens INTEGER DEFAULT 0,
+                error_message TEXT,
+                trace_json TEXT DEFAULT '[]'
+            );
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                id TEXT PRIMARY KEY, run_id TEXT NOT NULL,
+                step_index INTEGER NOT NULL, step_description TEXT,
+                state_json TEXT NOT NULL, tool_calls_json TEXT DEFAULT '[]',
+                observation TEXT, outcome TEXT,
+                tokens_used INTEGER DEFAULT 0, created_at REAL NOT NULL,
+                UNIQUE(run_id, step_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cp_run
+                ON checkpoints(run_id, step_index);
+            CREATE TABLE IF NOT EXISTS facts (
+                id TEXT PRIMARY KEY, content TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'agent',
+                confidence REAL DEFAULT 0.5,
+                embedding_json TEXT DEFAULT '',
+                created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                superseded_by TEXT DEFAULT '',
+                annotations_json TEXT DEFAULT '[]'
+            );
+            CREATE INDEX IF NOT EXISTS idx_facts_content
+                ON facts(content);
+            CREATE TABLE IF NOT EXISTS journal (
+                id TEXT PRIMARY KEY, type TEXT NOT NULL,
+                content TEXT NOT NULL, confidence REAL DEFAULT 0.5,
+                -- source_episodes_json: for observations/hypotheses/revisions
+                -- this holds episode IDs. For contradictions it holds the two
+                -- conflicting fact IDs (MF-016: documented overload, not renamed
+                -- to avoid breaking existing databases).
+                source_episodes_json TEXT DEFAULT '[]',
+                private INTEGER DEFAULT 1,
+                created_at REAL NOT NULL,
+                superseded_by TEXT DEFAULT '',
+                embedding_json TEXT DEFAULT '',
+                last_detected INTEGER DEFAULT 0,
+                annotations_json TEXT DEFAULT '[]',
+                links_json TEXT DEFAULT '[]'
+            );
+            CREATE INDEX IF NOT EXISTS idx_journal_type
+                ON journal(type);
+            CREATE INDEX IF NOT EXISTS idx_journal_created
+                ON journal(created_at);
+            CREATE TABLE IF NOT EXISTS reflection_queue (
+                id TEXT PRIMARY KEY, episode_id TEXT NOT NULL,
+                queued_at REAL NOT NULL, reflected INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                model_used TEXT DEFAULT '',
+                conversation_json TEXT DEFAULT '[]',
+                rolling_summary TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_updated
+                ON sessions(updated_at);
+            CREATE TABLE IF NOT EXISTS reflection_metrics (
+                id TEXT PRIMARY KEY,
+                created_at REAL NOT NULL,
+                episodes_considered INTEGER DEFAULT 0,
+                observations_proposed INTEGER DEFAULT 0,
+                observations_kept INTEGER DEFAULT 0,
+                hypotheses_proposed INTEGER DEFAULT 0,
+                hypotheses_kept INTEGER DEFAULT 0,
+                revisions_proposed INTEGER DEFAULT 0,
+                revisions_kept INTEGER DEFAULT 0,
+                contradictions_found INTEGER DEFAULT 0,
+                avg_confidence REAL DEFAULT 0.0,
+                keep_rate REAL DEFAULT 0.0,
+                consolidated_retired INTEGER DEFAULT 0,
+                consolidated_merged INTEGER DEFAULT 0,
+                total_journal_entries INTEGER DEFAULT 0,
+                total_facts INTEGER DEFAULT 0,
+                total_episodes INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS episode_tools (
+                episode_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (episode_id, tool_name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_episode_tools_name
+                ON episode_tools(tool_name);
+
+            -- Temporal triple store (MV2-003): subject-predicate-object facts
+            -- with valid time ranges. Empty valid_until means currently true.
+            CREATE TABLE IF NOT EXISTS temporal_triples (
+                id TEXT PRIMARY KEY,
+                subject TEXT NOT NULL,
+                predicate TEXT NOT NULL,
+                object TEXT NOT NULL,
+                valid_from REAL NOT NULL,
+                valid_until REAL,
+                fact_id TEXT,
+                confidence REAL DEFAULT 0.5,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_triples_subject_predicate
+                ON temporal_triples(subject, predicate, valid_from);
+            CREATE INDEX IF NOT EXISTS idx_triples_fact
+                ON temporal_triples(fact_id);
+        """)
+        self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns/indexes introduced after the initial schema, for existing DBs.
+
+        Each step is idempotent and resilient: indexes use ``IF NOT EXISTS``, and
+        the reflection-queue unique index is preceded by a dedup of any
+        pre-existing duplicate ``episode_id`` rows (the old code allowed dupes).
+        """
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)")}
+        if "embedding_json" not in cols:
+            self.conn.execute("ALTER TABLE episodes ADD COLUMN embedding_json TEXT DEFAULT ''")
+        jcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(journal)")}
+        if "superseded_by" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN superseded_by TEXT DEFAULT ''")
+        if "embedding_json" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN embedding_json TEXT DEFAULT ''")
+        if "last_detected" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN last_detected INTEGER DEFAULT 0")
+        rcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(agent_runs)")}
+        if "trace_json" not in rcols:
+            self.conn.execute("ALTER TABLE agent_runs ADD COLUMN trace_json TEXT DEFAULT '[]'")
+
+        scols = {r["name"] for r in self.conn.execute("PRAGMA table_info(sessions)")}
+        if "rolling_summary" not in scols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN rolling_summary TEXT DEFAULT ''")
+
+        # Dedup reflection_queue before adding the unique index, so an existing
+        # DB with duplicate episode_id rows (from pre-unique behaviour) can still
+        # migrate. Keep the earliest-queued row per episode_id.
+        self.conn.execute(
+            "DELETE FROM reflection_queue WHERE id NOT IN ("
+            "  SELECT id FROM reflection_queue q1 WHERE queued_at = ("
+            "    SELECT MIN(queued_at) FROM reflection_queue q2 "
+            "    WHERE q2.episode_id = q1.episode_id))"
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_rqueue_episode "
+            "ON reflection_queue(episode_id)"
+        )
+
+        # Partial indexes so vector-recall's ``embedding_json != ''`` filter
+        # doesn't full-scan the whole table once embeddings are common.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_episodes_embedded "
+            "ON episodes(embedding_json) WHERE embedding_json != ''"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_facts_embedded "
+            "ON facts(embedding_json) WHERE embedding_json != ''"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_journal_embedded "
+            "ON journal(embedding_json) WHERE embedding_json != ''"
+        )
+
+        # Cap any pre-existing facts that were stored at immutable confidence
+        # (1.0) before the MAX_FACT_CONFIDENCE rule existed.
+        self.conn.execute(
+            "UPDATE facts SET confidence = ? WHERE confidence > ? AND superseded_by = ''",
+            (MAX_FACT_CONFIDENCE, MAX_FACT_CONFIDENCE),
+        )
+
+        # Embedding model versioning: add embedding_model column to all
+        # three tables so we can detect when the model changes and trigger
+        # a backfill. Existing rows get '' (unknown — treated as "needs
+        # backfill" if a model name is configured).
+        for table in ("facts", "journal", "episodes"):
+            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "embedding_model" not in cols:
+                self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN embedding_model TEXT DEFAULT ''"
+                )
+
+        # MV2-003: ensure temporal_triples table exists in existing databases.
+        tcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(temporal_triples)")}
+        if not tcols:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS temporal_triples (
+                    id TEXT PRIMARY KEY,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    valid_from REAL NOT NULL,
+                    valid_until REAL,
+                    fact_id TEXT,
+                    confidence REAL DEFAULT 0.5,
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_triples_subject_predicate
+                    ON temporal_triples(subject, predicate, valid_from);
+                CREATE INDEX IF NOT EXISTS idx_triples_fact
+                    ON temporal_triples(fact_id);
+            """)
+
+        # MV2-008: ensure episode gap-marker flag exists in existing databases.
+        ecols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)")}
+        if "is_gap_marker" not in ecols:
+            self.conn.execute("ALTER TABLE episodes ADD COLUMN is_gap_marker INTEGER DEFAULT 0")
+
+        # MV2-004: ensure annotations_json columns exist on facts and journal.
+        fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(facts)")}
+        if "annotations_json" not in fcols:
+            self.conn.execute("ALTER TABLE facts ADD COLUMN annotations_json TEXT DEFAULT '[]'")
+        if "annotations_json" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN annotations_json TEXT DEFAULT '[]'")
+        if "links_json" not in jcols:
+            self.conn.execute("ALTER TABLE journal ADD COLUMN links_json TEXT DEFAULT '[]'")
+
+        self.conn.commit()
+
+        # Backfill episode_tools index for existing episodes that predate
+        # the index table. Parse tool_calls_json and populate the index.
+        indexed_count = self.conn.execute(
+            "SELECT COUNT(*) FROM episode_tools"
+        ).fetchone()[0]
+        if indexed_count == 0:
+            rows = self.conn.execute(
+                "SELECT id, tool_calls_json, created_at FROM episodes "
+                "WHERE tool_calls_json != '[]'"
+            ).fetchall()
+            for row in rows:
+                ep_id, tc_json, created = row[0], row[1], row[2]
+                try:
+                    calls = json.loads(tc_json) if tc_json else []
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                seen: set[str] = set()
+                for tc in calls:
+                    name = tc.get("tool") if isinstance(tc, dict) else None
+                    if name and name not in seen:
+                        seen.add(name)
+                        self.conn.execute(
+                            "INSERT OR IGNORE INTO episode_tools "
+                            "(episode_id, tool_name, created_at) VALUES (?, ?, ?)",
+                            (ep_id, name, created),
+                        )
+            self.conn.commit()
+
