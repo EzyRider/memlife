@@ -70,9 +70,15 @@ be explored later if hosted demand justifies it.
 - `NamespaceError` (new exception) is raised for invalid names.
 - Default namespace `_default` is reserved and maps to the original DB path
   behavior, preserving backward compatibility.
+- **Case normalization:** namespaces are lowercased in `db_path_for()` to avoid
+  silent collisions on case-insensitive filesystems (e.g. `Julie` and `julie`
+  map to the same DB file). The original value is preserved in
+  `MemoryConfig.namespace` for display/logging.
 - Embedder sharing is safe only when the model and dimensions match.
-  `switch_namespace()` docs must state this explicitly. If an embedder caches
-  per-store state, the cache must be invalidated or isolated on switch.
+  `switch_namespace()` docs must state this explicitly. Embedder instances
+  should be stateless with respect to store data; any per-store cache keys on
+  namespace. If an embedder implementation cannot guarantee that, create a
+  fresh embedder on switch rather than sharing.
 
 **Migration path (post-0.5.0 follow-up):**
 
@@ -82,14 +88,17 @@ be explored later if hosted demand justifies it.
 
 **Files to touch:**
 
-- `src/memlife/config.py` — add namespace field and path helper
+- `src/memlife/config.py` — add namespace field, path helper, `validate()`
 - `src/memlife/store.py` — resolve DB path in `__init__`
 - `src/memlife/sync_store.py` — pass namespace through
+- `src/memlife/mcp_server.py` — add `--namespace` / `MEMLIFE_NAMESPACE` CLI arg
 - `tests/test_namespaces.py` — new test module
 
 **Verification:**
 
 - Two namespaces sharing a directory do not see each other's episodes/facts/journal
+- `tmp_path` fixture: create two stores in the same temp dir with different
+  namespaces and assert writes in one are invisible to the other.
 - Switching namespaces creates/uses the correct DB file
 - Default namespace preserves existing DB path (migration-safe)
 - Invalid namespace values raise a clear error before touching the filesystem
@@ -121,8 +130,11 @@ single `vector_backend: str` enum. Keep old flags as aliases for one release.
 
 1. **Backend enum:** use `VectorBackend` enum (or `Literal["json", "sqlite-vec", "binary"]`),
   not a plain `str`, for validation and IDE support.
-2. **Auto-detection:** try to load `sqlite_vec` at runtime; fall back to JSON
-  with a logged warning if unavailable and backend was not explicitly set.
+2. **Auto-detection:** try to load `sqlite_vec` at runtime. If the user did
+  **not** explicitly request `sqlite-vec`, fall back to JSON with a logged
+  warning. If the user explicitly set `vector_backend="sqlite-vec"` and the
+  package is not installed, raise a clear `RuntimeError` instead of silently
+  falling back.
 3. **Schema management:** create virtual tables per embedding kind
   (`vec_episodes`, `vec_facts`, `vec_journal`) on first connection.
 4. **Dimension guards:** store expected dimension per table; reject mismatched
@@ -144,14 +156,17 @@ single `vector_backend: str` enum. Keep old flags as aliases for one release.
 - `src/memlife/_embeddings.py` — route serialization through chosen backend
 - `src/memlife/_schema.py` — create/drop virtual tables
 - `src/memlife/config.py` — add `vector_backend`, deprecate booleans
-- `tests/test_sqlite_vec.py` — expand coverage
+- `pyproject.toml` — add `sqlite-vec` extra and update `all` extra
+- `tests/test_sqlite_vec.py` — expand coverage; parameterize vector recall tests
 - `docs/vector-backends.md` — new comparison doc
 
 **Verification:**
 
 - All vector recall tests pass with each backend
+- Parameterize existing vector recall tests with a `vector_backend` fixture
 - Backfill produces correct vectors in the active backend
 - Dimension mismatch raises a clear error
+- Explicit `vector_backend="sqlite-vec"` without the package installed raises
 - CI runs sqlite-vec job
 
 ---
@@ -190,8 +205,10 @@ store.record_user_correction(
 **Work items:**
 
 1. **Reflection pass persistence:** store the raw reflection output, critic
-  scores, and final kept/dropped lists. Currently only aggregate metrics are
-  stored.
+  scores, and final kept/dropped lists. Because raw output can be large,
+  either (a) compress it as zlib/gzip into a BLOB column, or (b) keep full
+  detail for the most recent `reflection_pass_retention` passes and summarize
+  older ones (drop raw proposals, keep counts and aggregate scores).
 2. **Retention cap:** add `reflection_pass_retention: int = 100` config. Prune
   oldest passes on insert so the table does not grow unbounded.
 3. **`reflection_audit()` API:** paginated retrieval of past passes with enough
@@ -217,7 +234,9 @@ store.record_user_correction(
 
 - A user correction supersedes the target journal entry
 - A subsequent reflection pass includes the correction in context
+- `reflection_audit(limit=10)` returns passes in reverse chronological order
 - `reflection_audit()` returns the last N passes with kept/dropped breakdowns
+- Retention pruning removes the oldest pass when the cap is exceeded
 - Reflection pass history stays capped at `reflection_pass_retention`
 
 ---
@@ -228,13 +247,21 @@ These apply to all three work tracks:
 
 ### Configuration validation
 
-Add a `MemoryConfig.validate()` method that runs at `MemoryStore` init and
-fails fast with clear messages. Check at minimum:
+Add a public `MemoryConfig.validate()` method that users can call directly
+and that `MemoryStore.__init__()` invokes automatically. Check at minimum:
 
 - `namespace` matches the allowed character set.
 - `vector_backend` is a known value.
 - `db_path` is a writable path (not a directory).
 - Embedding model/dimension compatibility when an embedder is provided.
+
+Example standalone use:
+
+```python
+cfg = MemoryConfig(db_path="...", namespace="...", vector_backend="sqlite-vec")
+cfg.validate()
+store = MemoryStore(cfg)
+```
 
 This prevents half-initialized stores and surfaces misconfiguration before
 any data is written.
@@ -313,12 +340,13 @@ These are deliberately out of scope to keep the release shippable:
 - [ ] New tests cover namespaces, sqlite-vec, reflection audit
 - [ ] Ruff clean on `src/` and `tests/`
 - [ ] README updated with namespace and backend examples
-- [ ] `docs/namespaces.md` and `docs/vector-backends.md` created
+- [ ] `docs/namespaces.md`, `docs/vector-backends.md`, and `docs/reflection-audit.md` created
 - [ ] CHANGELOG.md created and populated for 0.5.0
 - [ ] Version bumped to `0.5.0b0` for beta, then `0.5.0`
 - [ ] PyPI upload
 - [ ] GitHub release notes
-- [ ] MCP server examples/docs updated if CLI args change
+- [ ] MCP server CLI updated with `--namespace` / `MEMLIFE_NAMESPACE`
+- [ ] sqlite-vec optional dependency added to `pyproject.toml`
 
 ---
 
@@ -327,7 +355,7 @@ These are deliberately out of scope to keep the release shippable:
 | ID | Decision | Default | Notes |
 |----|----------|---------|-------|
 | R1 | Namespace strategy | Separate DB files | Keeps schema and migration simple |
-| R2 | Vector backend config | `vector_backend: str` | Replaces `use_sqlite_vec`/`use_binary_vectors` booleans |
+| R2 | Vector backend config | `VectorBackend` enum | Replaces boolean flags; string values accepted as aliases for one release |
 | R3 | Multi-agent scope | Out of 0.5.0 | Single-agent-per-namespace only |
 | R4 | Corrections as journal entries | Yes | Reuse existing supersession/retirement machinery |
 | R5 | Sync subsystem | Separate package | Avoid bloating core memlife |
