@@ -36,6 +36,17 @@ def test_create_server_vector_backend(tmp_path):
     mcp._memlife_store.close()
 
 
+def test_create_server_defaults_to_json_vector_backend(tmp_path):
+    """When vector_backend is omitted, create_server defaults to json."""
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_default.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+    )
+    assert mcp._memlife_store.vector_backend.name == "json"
+    mcp._memlife_store.close()
+
+
 def _get_tool(server, name):
     """Get a tool function from the FastMCP server."""
     # FastMCP stores tools in _tool_manager

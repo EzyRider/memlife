@@ -559,10 +559,9 @@ def main():
     )
     parser.add_argument(
         "--vector-backend",
-        default=os.getenv("MEMLIFE_VECTOR_BACKEND", ""),
-        choices=["", "json", "sqlite_vec", "binary"],
-        help="Vector backend to use: json (default), sqlite_vec, or binary. "
-             "If empty, MemoryConfig's default applies.",
+        default=os.getenv("MEMLIFE_VECTOR_BACKEND", "json"),
+        choices=["json", "sqlite_vec", "binary"],
+        help="Vector backend to use: json (default), sqlite_vec, or binary",
     )
     parser.add_argument(
         "--reflection-timeout",
