@@ -178,8 +178,6 @@ def search(
     dim = len(query_vec)
     vec_table = table_name(dim)
     meta_table = f"{vec_table}_meta"
-    rid_low = rowid_for(kind, "", dim)
-    rid_high = rowid_for(kind + "\xff", "", dim)
     try:
         rows = conn.execute(
             f"""
