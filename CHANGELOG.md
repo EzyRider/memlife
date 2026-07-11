@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-11
+
+### Fixed
+
+- Vector backend `search()` is now used by fact, episode, and journal recall.
+  Previously only `sqlite_vec` was special-cased; `json` and `binary` backends
+  did their own inline cosine/Hamming computation, so selecting
+  `vector_backend="binary"` did not actually use Hamming distance search.
+- `JsonVectorBackend.search()` now applies the contradiction filter correctly.
+- `_recall_facts_sqlite_vec()` no longer reaches through `conn._raw` directly;
+  it uses the public `self.vector_backend.search()` API.
+- Legacy `use_binary_vectors=True` is promoted to `vector_backend="binary"`
+  when no explicit backend is set.
+- `MemoryConfig.resolved_vector_backend()` centralises backend precedence:
+  explicit `vector_backend` > `use_binary_vectors` > `use_sqlite_vec` > `json`
+  default. When both legacy flags are True a warning is logged and binary wins.
+- MCP server shutdown now closes the store, embedder, chat adapter, and
+  reflector, and SIGTERM exits the process after cleanup instead of hanging.
+- Ollama embedder/chat adapters now create their `aiohttp.ClientSession` lazily
+  on the first async call, avoiding `RuntimeError` when instantiated outside a
+  running event loop.
+
+### Added
+
+- `tests/test_vector_backends.py` now covers `BinaryVectorBackend` store, delete,
+  serialize, deserialize, search, and end-to-end binary recall.
+- `tests/test_config.py` covers vector backend precedence, normalisation, and
+  ambiguity warnings.
+
 ## [0.5.1] - 2026-07-11
 
 ### Fixed

@@ -6,9 +6,28 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.5.1**
+**Current version: 0.5.2**
 
-## What's new in 0.5.0
+## What's new in 0.5.2
+
+- **Binary vector backend is now used for retrieval.** Previously the backend
+  was selectable but recall still used inline cosine. Fact, episode, and journal
+  vector recall now route through the configured backend, so `binary` uses
+  Hamming distance search and `sqlite_vec` uses sqlite-vec KNN.
+- **Vector backend precedence is centralised.** `MemoryConfig.resolved_vector_backend()`
+  gives a clear order: explicit `vector_backend` > `use_binary_vectors` >
+  `use_sqlite_vec` > `json` default. Both legacy flags at once now resolve to
+  `binary` with a warning, instead of silently depending on if/else order.
+- **MCP server shutdown is clean.** The shutdown path now closes the store,
+  embedder, chat adapter, and reflector, and SIGTERM exits the process after
+  cleanup instead of hanging.
+- **Ollama adapters no longer create sessions before a loop exists.** Sessions
+  are created lazily on first async call, avoiding `RuntimeError` when the
+  embedder/chat is instantiated outside an event loop.
+
+## What's new in 0.5.1
+
+- `memlife-mcp-server` now accepts `--vector-backend {json,sqlite_vec,binary}`.
 
 - **Pluggable vector backends.** Swap between JSON, binary, and `sqlite-vec`
   backends with a single config change. The new binary backend stores embeddings
@@ -313,7 +332,7 @@ memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pre
 
 ## Status
 
-**v0.5.0.** The API may change before v1.0. Not recommended for production yet.
+**v0.5.2.** The API may change before v1.0. Not recommended for production yet.
 
 ## License
 
