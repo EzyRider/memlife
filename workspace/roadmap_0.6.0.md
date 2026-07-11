@@ -17,15 +17,17 @@
 Notes:
 - MF-001..MF-004, MF-006..MF-011, MF-013, MF-015, MF-016 are shipped in 0.5.x.
 - MF-012 is a real security hole for anyone restoring from JSONL backups.
-- MF-014 makes the zero-LLM / test path unreliable; worth fixing before
+- MF-014 makes the zero-LLM / quickstart path unreliable; worth fixing before
   promoting "no-LLM mode" more loudly.
+- MF-005 is low because contradiction embeddings are currently only created
+  when an explicit contradiction record exists; backfill is a model-change
+  edge case.
 
 ## 2. Cleanup / hygiene (from MF-016 latent list)
 
 | Item | Notes |
 |------|-------|
-| Fix README "No-LLM Mode" example (currently uses `await` outside async function) | Docs only |
-| `SyncMemoryStore._run()` swallows "already running" `RuntimeError` then calls `asyncio.run()` from inside a running loop | Concurrency bug |
+| `SyncMemoryStore._run()` swallows "already running" `RuntimeError` then calls `asyncio.run()` from inside a running loop | Concurrency bug; can crash the sync wrapper |
 | `OpenAIChat.chat()` does not handle empty `response.choices` | Robustness |
 | `sentence_transformers` adapter uses deprecated `asyncio.get_event_loop()` | Deprecation cleanup |
 | `Reflector` duplicates decay/config parameters instead of accepting `MemoryConfig` | API hygiene |
@@ -43,11 +45,15 @@ Notes:
 ### 3.2 Embedding cache / model versioning per vector
 - Content-addressable cache keyed on `(model_name, sha256(text)) -> vector`.
 - Makes model swaps cheap and repeated text instant.
-- Was deferred in 0.5.0 as a nice-to-have.
+- Was deferred in 0.5.0 as a nice-to-have; now promoted because entity
+  graphing and reflection both benefit from fast, deterministic embeddings.
 
 ### 3.3 Incremental conflict detection
 - Stop O(n²) pairwise contradiction scans.
 - Use vector-neighborhood or indexing to reduce scan cost as fact count grows.
+- **Gate:** profile current reflection cost on a representative fact set
+  before committing to the implementation. Entity graphing may provide
+  clustering shortcuts.
 
 ### 3.4 Widen reflection window
 - Allow reflection to look further back than the current narrow window.
@@ -78,23 +84,31 @@ Notes:
 | `docs/vector-backends.md` | Comparison of JSON / binary / sqlite-vec |
 | `docs/namespaces.md` | Namespace design, migration, backup/restore |
 | `docs/reflection-audit.md` | Reflection transparency and correction usage |
-| README no-LLM example fix | See cleanup section |
+| README no-LLM example fix | See 0.5.5 release notes |
 | Add `CHANGELOG.md` entries for 0.5.x if not already current | Verify against git tags |
 
 ## 6. Release planning
 
-### 0.5.5 (potential patch)
-- MF-012 `import_jsonl` SQL injection fix.
-- MF-014 `DummyEmbedder` bag-of-words fix.
-- README no-LLM example fix.
+### 0.5.5 (patch, soon)
+Security / correctness / concurrency fixes that should not wait for 0.6.0.
+
+1. **MF-012** — `import_jsonl` SQL injection fix (whitelist columns per table).
+2. **MF-014** — `DummyEmbedder` bag-of-words correctness fix.
+3. **`SyncMemoryStore._run()` concurrency fix** — stop swallowing the
+   "already running" `RuntimeError` and calling `asyncio.run()` inside a loop.
+4. **README no-LLM example fix** — make the "No-LLM Mode" snippet valid Python.
 
 ### 0.6.0 (minor)
-- Entity graphing MVP.
-- Embedding cache / model-versioned vectors.
-- Incremental conflict detection.
-- `Reflector` config deduplication cleanup.
-- Docs split: `docs/vector-backends.md`, `docs/namespaces.md`,
-  `docs/reflection-audit.md`.
+Focused on entity graphing and the storage layer it depends on.
+
+1. **Entity graphing MVP**
+2. **Embedding cache / model-versioned vectors** — do this first in the 0.6.0
+   cycle so graphing and reflection build on it.
+3. **Incremental conflict detection** — only if profiling during 0.6.0 shows
+   O(n²) scans are hurting.
+4. **`Reflector` config deduplication cleanup**
+5. **Docs split** — `docs/vector-backends.md`, `docs/namespaces.md`,
+   `docs/reflection-audit.md`.
 
 ### Beyond 0.6.0
 - Multi-agent identity / author attribution (was 0.6.0 in ROADMAP_v2; now
@@ -118,6 +132,8 @@ Notes:
 | R7 | Embedder sharing across namespaces | Opt-in only | Shipped in 0.5.x |
 | R8 | Reflection pass API | Internal record, public audit | Shipped in 0.5.x |
 | R9 | Next major feature | Entity graphing | Decided 2026-07-11 |
+| R10 | Incremental conflict detection | Defer unless profiling justifies | Added 2026-07-11 |
+| R11 | Embedding cache sequencing | First 0.6.0 item | Added 2026-07-11 |
 
 ---
 
