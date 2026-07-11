@@ -180,3 +180,48 @@ def test_server_has_tools_registered(server):
     # Check that at least the tool functions were registered
     # (FastMCP may store them differently across versions)
     assert len(tool_names) > 0 or hasattr(manager, '_tools')
+
+
+def test_shutdown_mcp_server_closes_store(server):
+    """shutdown_mcp_server closes the underlying store."""
+    from memlife.mcp_server import shutdown_mcp_server
+    store = server._memlife_store
+    assert store._conn is not None or store.db_path
+    shutdown_mcp_server(server)
+    assert store._conn is None
+
+
+def test_shutdown_mcp_server_idempotent(server):
+    """shutdown_mcp_server can be called twice without error."""
+    from memlife.mcp_server import shutdown_mcp_server
+    shutdown_mcp_server(server)
+    shutdown_mcp_server(server)  # should not raise
+
+
+def test_create_server_embedder_is_dummy(server):
+    """The default embedder is the zero-dependency DummyEmbedder."""
+    from memlife.embedders import DummyEmbedder
+    assert isinstance(server._memlife_embedder, DummyEmbedder)
+
+
+@pytest.mark.asyncio
+async def test_ollama_session_deferred_creation(tmp_path):
+    """Ollama adapters do not create an aiohttp session outside an async context."""
+    from memlife.adapters.ollama import OllamaEmbedder, OllamaChat
+
+    embedder = OllamaEmbedder(model="dummy")
+    chat = OllamaChat(model="dummy")
+    # No session should exist before an async call.
+    assert embedder._session is None
+    assert chat._session is None
+
+    # Creating the session from inside an async context works.
+    async def _touch():
+        embedder._ensure_session()
+        chat._ensure_session()
+
+    await _touch()
+    assert embedder._session is not None
+    assert chat._session is not None
+    await embedder.close()
+    await chat.close()

@@ -29,11 +29,12 @@ Resources:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import atexit
-import signal
 import json
 import logging
 import os
+import signal
 import sys
 
 from memlife.config import MemoryConfig
@@ -111,6 +112,8 @@ def create_server(
                 model=chat_model,
                 fallback_models=[critic_model],
             )
+            # Expose the adapter to shutdown_mcp_server once created.
+            mcp._memlife_chat_adapter = _chat_adapter
 
             # Reflector calls model_chat.chat(messages, model) — OllamaChat
             # implements that directly. No wrapper needed.
@@ -121,6 +124,7 @@ def create_server(
                 critic_model=critic_model,
             )
             _reflector.model_name = chat_model
+            mcp._memlife_reflector = _reflector
         return _reflector
 
     mcp = FastMCP("memlife")
@@ -454,12 +458,49 @@ def create_server(
         items = store.list_contradictions(limit=20)
         return json.dumps(items, indent=2, default=str)
 
-    # Store reference for cleanup
+    # Store references for cleanup (MF-016: MCP server cleanup).
     mcp._memlife_store = store
     mcp._memlife_embedder = embedder
+    mcp._memlife_chat_adapter = _chat_adapter
     mcp._memlife_get_reflector = _get_reflector
 
     return mcp
+
+
+def _close_resource(name: str, resource: object | None) -> None:
+    """Close a resource that may have a sync or async close method."""
+    if resource is None:
+        return
+    close_fn = getattr(resource, "close", None)
+    if close_fn is None:
+        return
+    try:
+        if asyncio.iscoroutinefunction(close_fn):
+            try:
+                asyncio.run(close_fn())
+            except Exception as exc:  # pragma: no cover
+                logger.warning("error closing async resource %s: %s", name, exc)
+        else:
+            close_fn()
+    except Exception as exc:  # pragma: no cover
+        logger.warning("error closing resource %s: %s", name, exc)
+
+
+def shutdown_mcp_server(mcp) -> None:
+    """Close all resources owned by a memlife MCP server.
+
+    Safe to call multiple times. Closes the store, embedder, chat adapter,
+    and reflector (if any were created).
+    """
+    store = getattr(mcp, "_memlife_store", None)
+    embedder = getattr(mcp, "_memlife_embedder", None)
+    chat = getattr(mcp, "_memlife_chat_adapter", None)
+    reflector = getattr(mcp, "_memlife_reflector", None)
+
+    _close_resource("reflector", reflector)
+    _close_resource("chat_adapter", chat)
+    _close_resource("embedder", embedder)
+    _close_resource("store", store)
 
 
 def main():
@@ -535,16 +576,21 @@ def main():
     )
 
     # MF-016: ensure store, embedder, and sessions are cleaned up on exit.
-    def _shutdown() -> None:
-        try:
-            server._memlife_store.close()  # type: ignore[attr-defined]
-            logger.info("memlife store closed")
-        except Exception as exc:  # pragma: no cover
-            logger.warning("error closing memlife store: %s", exc)
+    # Use shutdown_mcp_server so all resources (store, embedder, chat adapter,
+    # reflector) are closed, not just the SQLite connection.
+    atexit.register(lambda: shutdown_mcp_server(server))
 
-    atexit.register(_shutdown)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda _signum, _frame: _shutdown())
+    # SIGTERM: clean up and exit. SIGINT is left to its default handler so
+    # server.run() receives KeyboardInterrupt, atexit still runs, and the
+    # process terminates cleanly. The old handler returned without exiting,
+    # which could leave the server hung on SIGINT/SIGTERM.
+    def _handle_signal(signum, _frame) -> None:  # pragma: no cover
+        sig_name = signal.Signals(signum).name
+        logger.info("received %s, shutting down memlife MCP server", sig_name)
+        shutdown_mcp_server(server)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _handle_signal)
 
     server.run()
 

@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -52,9 +53,21 @@ class OllamaEmbedder:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session = _session
 
-    @property
-    def session(self) -> aiohttp.ClientSession:
+    def _ensure_session(self) -> aiohttp.ClientSession:
+        """Lazy-create an aiohttp session inside an async context.
+
+        Creating ``aiohttp.ClientSession()`` outside a running event loop
+        raises ``RuntimeError`` in recent aiohttp versions. We defer creation
+        until the first async embed/chat call so the session is always
+        attached to a live loop (MF-016).
+        """
         if self._session is None or self._session.closed:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "OllamaEmbedder session must be created from an async context"
+                ) from exc
             self._session = aiohttp.ClientSession()
         return self._session
 
@@ -64,7 +77,7 @@ class OllamaEmbedder:
             return []
         payload = {"model": self.model, "input": texts}
         try:
-            async with self.session.post(
+            async with self._ensure_session().post(
                 f"{self.base_url}/api/embed",
                 json=payload,
                 timeout=self._timeout,
@@ -117,9 +130,18 @@ class OllamaChat:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session = _session
 
-    @property
-    def session(self) -> aiohttp.ClientSession:
+    def _ensure_session(self) -> aiohttp.ClientSession:
+        """Lazy-create an aiohttp session inside an async context.
+
+        See ``OllamaEmbedder._ensure_session`` for rationale (MF-016).
+        """
         if self._session is None or self._session.closed:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "OllamaChat session must be created from an async context"
+                ) from exc
             self._session = aiohttp.ClientSession()
         return self._session
 
@@ -172,7 +194,7 @@ class OllamaChat:
         last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
-                async with self.session.post(
+                async with self._ensure_session().post(
                     f"{self.base_url}/api/chat",
                     json=payload,
                     timeout=self._timeout,
