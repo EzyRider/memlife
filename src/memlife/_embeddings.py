@@ -186,6 +186,7 @@ class EmbedMixin:
                         "UPDATE facts SET embedding_json = ?, embedding_model = ? WHERE id = ?",
                         (self._serialize_vec(vec), self.embedding_model_name, row[0]),
                     )
+                    self._maybe_store_vec("facts", row[0], vec)
                     results["facts_embedded"] += 1
                 else:
                     results["failed"] += 1
@@ -230,6 +231,7 @@ class EmbedMixin:
                         "UPDATE journal SET embedding_json = ?, embedding_model = ? WHERE id = ?",
                         (self._serialize_vec(vec), self.embedding_model_name, row[0]),
                     )
+                    self._maybe_store_vec("journal", row[0], vec)
                     results["journal_embedded"] += 1
                 else:
                     results["failed"] += 1
@@ -255,6 +257,7 @@ class EmbedMixin:
                         "UPDATE episodes SET embedding_json = ?, embedding_model = ? WHERE id = ?",
                         (self._serialize_vec(vec), self.embedding_model_name, row[0]),
                     )
+                    self._maybe_store_vec("episodes", row[0], vec)
                     results["episodes_embedded"] += 1
                 else:
                     results["failed"] += 1
