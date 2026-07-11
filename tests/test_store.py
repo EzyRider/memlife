@@ -138,3 +138,111 @@ async def test_import_export_jsonl(store, tmp_path):
     eps = new_store.recent(limit=5)
     assert any("test episode" in e.task for e in eps)
     new_store.close()
+
+
+@pytest.mark.asyncio
+async def test_resolve_fact_after_revision(store):
+    """resolve_fact follows supersession chains without crashing."""
+    old_id = await store.store_fact("User lives in Wellington", confidence=0.7)
+    new_id = await store.revise_fact(old_id, "User lives in Auckland", confidence=0.8)
+    resolved = store.resolve_fact(old_id)
+    assert resolved is not None
+    assert resolved.id == new_id
+    assert not resolved.retired
+
+
+@pytest.mark.asyncio
+async def test_fact_retired_property(store):
+    """Expired facts report retired=True; superseded ones report False."""
+    fact_id = await store.store_fact("Temporary fact", confidence=0.7)
+    store.expire_fact(fact_id)
+    fact = store.fact_by_id(fact_id)
+    assert fact.retired
+    # Superseded but not expired
+    old_id = await store.store_fact("Another fact", confidence=0.7)
+    new_id = await store.revise_fact(old_id, "Updated fact", confidence=0.8)
+    old = store.fact_by_id(old_id)
+    assert not old.retired
+    assert old.superseded_by == new_id
+
+
+@pytest.mark.asyncio
+async def test_import_export_jsonl_preserves_extra_columns(store, tmp_path):
+    """Export/import round-trip preserves annotations, links, and last_detected."""
+    from memlife import MemoryConfig, export_jsonl, import_jsonl
+
+    fact_id = await store.store_fact("test fact", confidence=0.7)
+    store.annotate_fact(fact_id, "confirmed")
+    # Journal entry with links and last_detected
+    jid = store.add_journal_entry("observation", "test observation", confidence=0.8)
+    store.link_journal_entries(jid, fact_id, "related", strength=0.9)
+    store.conn.execute(
+        "UPDATE journal SET last_detected = ? WHERE id = ?", (42, jid)
+    )
+    store.conn.commit()
+
+    export_path = str(tmp_path / "export.jsonl")
+    export_jsonl(store, export_path)
+
+    new_db = str(tmp_path / "import.db")
+    new_store = MemoryStore(config=MemoryConfig(db_path=new_db), embedder=DummyEmbedder())
+    import_jsonl(new_store, export_path)
+
+    imported_fact = new_store.fact_by_id(fact_id)
+    assert imported_fact is not None
+    assert "confirmed" in imported_fact.annotations
+
+    imported_journal = new_store.conn.execute(
+        "SELECT last_detected, annotations_json, links_json FROM journal WHERE id = ?",
+        (jid,),
+    ).fetchone()
+    assert imported_journal is not None
+    assert imported_journal[0] == 42
+    assert "confirmed" not in imported_journal[1]  # journal has no annotations here
+    assert fact_id in imported_journal[2]
+    new_store.close()
+
+
+@pytest.mark.asyncio
+async def test_reinforce_contradictions_only_when_detected(store):
+    """reinforce_unresolved_contradictions only touches re-detected pairs."""
+    a = await store.store_fact("User lives in Wellington", confidence=0.8)
+    b = await store.store_fact("User lives in Auckland", confidence=0.8)
+    jid = store.add_journal_entry(
+        "contradiction",
+        "location conflict",
+        confidence=0.7,
+        source_episodes=[a, b],
+    )
+    # Set initial last_detected
+    store.conn.execute("UPDATE journal SET last_detected = ? WHERE id = ?", (1, jid))
+    store.conn.commit()
+
+    # Empty detected set: last_detected stays at 1 even though both facts are active.
+    reinforced = store.reinforce_unresolved_contradictions(
+        current_cycle=2, detected_pairs=set()
+    )
+    assert reinforced == 0
+    row = store.conn.execute(
+        "SELECT last_detected FROM journal WHERE id = ?", (jid,)
+    ).fetchone()
+    assert row[0] == 1
+
+    # Pass the pair as detected: contradiction gets reinforced.
+    pair = tuple(sorted((a, b)))
+    reinforced = store.reinforce_unresolved_contradictions(
+        current_cycle=3, detected_pairs={pair}
+    )
+    assert reinforced == 1
+    row = store.conn.execute(
+        "SELECT last_detected FROM journal WHERE id = ?", (jid,)
+    ).fetchone()
+    assert row[0] == 3
+
+    # None (default) reinforces all unresolved contradictions for backward compat.
+    reinforced = store.reinforce_unresolved_contradictions(current_cycle=4)
+    assert reinforced == 1
+    row = store.conn.execute(
+        "SELECT last_detected FROM journal WHERE id = ?", (jid,)
+    ).fetchone()
+    assert row[0] == 4

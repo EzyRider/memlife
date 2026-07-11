@@ -6,6 +6,27 @@ from memlife import Reflector, DummyChat
 
 
 @pytest.mark.asyncio
+async def test_dummy_chat_extracts_real_grounds():
+    """DummyChat skips the system prompt and extracts real episode IDs."""
+    chat = DummyChat()
+    messages = [
+        {
+            "role": "system",
+            "content": 'Example: "grounds": ["ep_..."] is a placeholder.',
+        },
+        {
+            "role": "user",
+            "content": "Today's episodes (ids: ep_abc123, ep_def456): user did things.",
+        },
+    ]
+    raw = await chat.chat(messages, model="test")
+    import json
+
+    data = json.loads(raw)
+    assert data["observations"][0]["grounds"] == ["ep_abc123"]
+
+
+@pytest.mark.asyncio
 async def test_reflection_creates_journal(store, config):
     """Reflection with DummyChat produces journal entries."""
     store.remember(

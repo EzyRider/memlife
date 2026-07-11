@@ -50,7 +50,7 @@ class SyncMemoryStore:
     def _run(self, coro: Any) -> Any:
         """Run a coroutine, creating a new event loop if needed."""
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # We're already in an async context — can't use asyncio.run().
             raise RuntimeError(
                 "SyncMemoryStore cannot be used from within a running "
