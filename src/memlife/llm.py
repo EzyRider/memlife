@@ -17,13 +17,17 @@ class DummyChat:
     """
 
     async def chat(self, messages: list[dict], model: str) -> str:
-        # Extract episode IDs from the prompt to use as grounds.
+        # Extract episode IDs from the user/reflection prompt to use as grounds.
+        # Skip the system prompt, which contains a literal "ep_..." example.
         grounds = []
         for msg in messages:
-            content = msg.get("content", "") if isinstance(msg, dict) else ""
+            if not isinstance(msg, dict) or msg.get("role") == "system":
+                continue
+            content = msg.get("content", "")
             if "ep_" in content:
                 grounds = re.findall(r"ep_\w+", content)
-                break
+                if grounds:
+                    break
 
         return json.dumps({
             "observations": [

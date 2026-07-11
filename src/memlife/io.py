@@ -34,7 +34,8 @@ def export_jsonl(store: MemoryStore, path: str) -> dict:
         # Facts
         for row in store.conn.execute(
             "SELECT id, content, source, confidence, embedding_json, "
-            "embedding_model, created_at, updated_at, superseded_by FROM facts"
+            "embedding_model, created_at, updated_at, superseded_by, "
+            "annotations_json FROM facts"
         ).fetchall():
             f.write(json.dumps({
                 "table": "facts",
@@ -46,7 +47,8 @@ def export_jsonl(store: MemoryStore, path: str) -> dict:
         for row in store.conn.execute(
             "SELECT id, type, content, confidence, source_episodes_json, "
             "private, created_at, superseded_by, embedding_json, "
-            "embedding_model FROM journal"
+            "embedding_model, last_detected, annotations_json, links_json "
+            "FROM journal"
         ).fetchall():
             f.write(json.dumps({
                 "table": "journal",
@@ -82,10 +84,11 @@ def import_jsonl(store: MemoryStore, path: str) -> dict:
         "episodes": {"id", "task", "outcome", "summary", "tool_calls_json",
                       "created_at", "embedding_json", "embedding_model"},
         "facts": {"id", "content", "source", "confidence", "embedding_json",
-                  "embedding_model", "created_at", "updated_at", "superseded_by"},
+                  "embedding_model", "created_at", "updated_at", "superseded_by",
+                  "annotations_json"},
         "journal": {"id", "type", "content", "confidence", "source_episodes_json",
                     "private", "created_at", "superseded_by", "embedding_json",
-                    "embedding_model", "last_detected"},
+                    "embedding_model", "last_detected", "annotations_json", "links_json"},
         "sessions": {"id", "name", "created_at", "updated_at", "model_used",
                       "conversation_json", "rolling_summary"},
     }
