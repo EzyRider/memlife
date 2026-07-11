@@ -64,3 +64,20 @@ class TestVectorBackendResolution:
             cfg.validate()
         # resolved_vector_backend() does not validate; it just normalises.
         assert cfg.resolved_vector_backend() == "magic_vec"
+
+    def test_validate_runs_all_checks_when_vector_backend_is_none(self):
+        """Regression: default vector_backend=None must not short-circuit validate()."""
+        cfg = MemoryConfig(
+            vector_backend=None,
+            sqlite_busy_timeout_ms=-500,
+            recency_halflife_days=-1,
+            fact_merge_threshold=5.0,
+        )
+        with pytest.raises(ValueError):
+            cfg.validate()
+
+    def test_validate_accepts_valid_default_config(self):
+        """Default config with vector_backend=None should validate cleanly."""
+        cfg = MemoryConfig()
+        cfg.validate()
+        assert cfg.resolved_vector_backend() == "json"

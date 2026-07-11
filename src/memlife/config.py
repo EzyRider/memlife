@@ -146,16 +146,15 @@ class MemoryConfig:
         # Vector backend must be a known value (or None for auto).  The store
         # normalises "sqlite-vec" to "sqlite_vec" internally.
         backend = self.vector_backend
-        if backend is None:
-            return
-        backend = backend.strip().lower()
-        if backend == "sqlite-vec":
-            backend = "sqlite_vec"
-        if backend not in VECTOR_BACKENDS:
-            raise ValueError(
-                f"unknown vector_backend: {self.vector_backend!r}. "
-                f"Supported: json, binary, sqlite_vec"
-            )
+        if backend is not None:
+            backend = backend.strip().lower()
+            if backend == "sqlite-vec":
+                backend = "sqlite_vec"
+            if backend not in VECTOR_BACKENDS:
+                raise ValueError(
+                    f"unknown vector_backend: {self.vector_backend!r}. "
+                    f"Supported: json, binary, sqlite_vec"
+                )
 
         # db_path, when explicit, must not be a directory.
         if self.db_path:

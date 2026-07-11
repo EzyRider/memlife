@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from memlife import (
@@ -337,6 +339,47 @@ async def test_binary_backend_recall_facts_end_to_end(tmp_path):
     assert facts[0].id == cat_id
     assert getattr(facts[0], "_vector_sim", 0.0) == pytest.approx(1.0)
     store.close()
+
+
+@pytest.mark.asyncio
+async def test_binary_backend_reads_legacy_json_vectors(tmp_path):
+    """Switching from json to binary backend must not lose old JSON vectors."""
+    db = tmp_path / "mixed_format.db"
+
+    # First, populate with the default JSON backend.
+    json_cfg = MemoryConfig(
+        db_path=str(db),
+        vector_backend="json",
+        embedding_model="dummy",
+    )
+    json_store = MemoryStore(config=json_cfg, embedder=DummyEmbedder())
+    cat_id = await json_store.store_fact("cats are great", confidence=0.9, embed=False)
+    dog_id = await json_store.store_fact("dogs are great", confidence=0.9, embed=False)
+    cat_vec = [1.0, 0.0, 0.0]
+    dog_vec = [0.0, 1.0, 0.0]
+    json_store.conn.execute(
+        "UPDATE facts SET embedding_json = ? WHERE id = ?",
+        (json.dumps(cat_vec), cat_id),
+    )
+    json_store.conn.execute(
+        "UPDATE facts SET embedding_json = ? WHERE id = ?",
+        (json.dumps(dog_vec), dog_id),
+    )
+    json_store.conn.commit()
+    json_store.close()
+
+    # Reopen with binary backend; legacy JSON vectors must still be searchable.
+    binary_cfg = MemoryConfig(
+        db_path=str(db),
+        vector_backend="binary",
+        embedding_model="dummy",
+    )
+    binary_store = MemoryStore(config=binary_cfg, embedder=DummyEmbedder())
+    facts = await binary_store.recall_facts("cats", limit=5, query_vector=cat_vec)
+    cat_fact = next((f for f in facts if f.id == cat_id), None)
+    assert cat_fact is not None, "binary backend must find the JSON-stored cat vector"
+    assert getattr(cat_fact, "_vector_sim", 0.0) == pytest.approx(1.0)
+    binary_store.close()
 
 
 def test_legacy_use_binary_vectors_selects_binary(tmp_path):

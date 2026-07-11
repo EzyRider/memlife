@@ -10,6 +10,7 @@ Hamming distance on the packed representation instead of expanding to floats.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -49,25 +50,51 @@ class BinaryVectorBackend(VectorBackend):
         return f"binary:{len(vec)}:{base64.b64encode(packed).decode()}"
 
     def deserialize(self, raw: str) -> list[float] | None:
-        """Reconstruct a float vector from its binary packed form."""
-        if not raw or not raw.startswith("binary:"):
+        """Reconstruct a float vector from its stored form.
+
+        Accepts the native ``binary:<dim>:<bytes>`` prefix and falls back to
+        JSON deserialization for rows stored by ``JsonVectorBackend`` before a
+        backend switch. This prevents data loss when a user flips from the
+        default JSON backend to binary on an existing store.
+        """
+        if not raw:
             return None
+        if raw.startswith("binary:"):
+            try:
+                _, dim_str, b64 = raw.split(":", 2)
+                dim = int(dim_str)
+                packed = base64.b64decode(b64)
+                return binary_vectors.debinarize(packed, dim)
+            except Exception:
+                return None
         try:
-            _, dim_str, b64 = raw.split(":", 2)
-            dim = int(dim_str)
-            packed = base64.b64decode(b64)
-            return binary_vectors.debinarize(packed, dim)
-        except Exception:
+            return json.loads(raw)
+        except json.JSONDecodeError:
             return None
 
     def _unpack(self, raw: str) -> tuple[bytes, int] | None:
-        """Return the packed bytes and dimension for a stored vector."""
-        if not raw or not raw.startswith("binary:"):
+        """Return the packed bytes and dimension for a stored vector.
+
+        Falls back to full deserialization for JSON-encoded vectors so that
+        Hamming distance search can still rank embeddings created before the
+        binary backend was selected.  The debinarizer converts floats back to
+        packed form, which is acceptable for mixed-format recall.
+        """
+        if not raw:
             return None
+        if raw.startswith("binary:"):
+            try:
+                _, dim_str, b64 = raw.split(":", 2)
+                dim = int(dim_str)
+                return base64.b64decode(b64), dim
+            except Exception:
+                return None
+        # JSON-stored vector: deserialize and binarize on the fly.
         try:
-            _, dim_str, b64 = raw.split(":", 2)
-            dim = int(dim_str)
-            return base64.b64decode(b64), dim
+            vec = json.loads(raw)
+            if not vec:
+                return None
+            return binary_vectors.binarize(vec), len(vec)
         except Exception:
             return None
 
