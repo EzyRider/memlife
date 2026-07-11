@@ -197,6 +197,21 @@ def test_create_server_reflection_timeout(tmp_path):
     mcp._memlife_store.close()
 
 
+def test_create_server_feature_flags(tmp_path):
+    """create_server forwards optional memlife feature flags."""
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_flags.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        memorias_extraction=True,
+        polyphonic_recall=True,
+    )
+    cfg = mcp._memlife_store.config
+    assert cfg.memorias_extraction is True
+    assert cfg.use_polyphonic_recall is True
+    mcp._memlife_store.close()
+
+
 @pytest.mark.asyncio
 async def test_memory_reflect_tool_returns_error_on_missing_chat_model(tmp_path):
     """memory_reflect reports a clear error when no chat model is configured."""

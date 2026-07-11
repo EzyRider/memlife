@@ -280,6 +280,8 @@ Claude Desktop config:
 | `memory_expire` | Mark a fact as expired |
 | `memory_retrieve` | Unified cross-layer retrieval |
 | `memory_gc` | Run garbage collection |
+| `memory_vacuum` | Reclaim disk space from the SQLite database |
+| `memory_reflect` | Run reflection pass (synthesise episodes into journal) |
 
 **Resources:**
 

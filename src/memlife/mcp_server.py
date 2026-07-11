@@ -73,6 +73,8 @@ def create_server(
     critic_model: str = "",  # MF-011: caller must provide
     reflection_timeout: float = 0.0,
     reflection_total_timeout: float = 0.0,
+    memorias_extraction: bool = False,
+    polyphonic_recall: bool = False,
 ):
     """Create and configure a FastMCP server with memlife tools.
 
@@ -92,6 +94,10 @@ def create_server(
         config_kwargs["reflection_timeout"] = reflection_timeout
     if reflection_total_timeout:
         config_kwargs["reflection_total_timeout"] = reflection_total_timeout
+    if memorias_extraction:
+        config_kwargs["memorias_extraction"] = memorias_extraction
+    if polyphonic_recall:
+        config_kwargs["use_polyphonic_recall"] = polyphonic_recall
     config = MemoryConfig(**config_kwargs)
     embedder = _make_embedder(embedder_type, embedding_model, base_url)
     store = MemoryStore(config=config, embedder=embedder)
@@ -203,6 +209,10 @@ def create_server(
 
         Pass tool_name to search by tool (e.g. 'read_file'), or query
         for text search. Optionally filter by outcome ('success' or 'failed').
+
+        Note: tool-name search only finds episodes that recorded tool usage
+        via remember(..., tool_name=...). Episodes created without a tool tag
+        will not match a tool_name query.
 
         Args:
             query: Text to search for in task/summary.
@@ -567,6 +577,18 @@ def main():
         help="Total reflection pass timeout in seconds (default: use MemoryConfig)",
     )
     parser.add_argument(
+        "--memorias-extraction",
+        action="store_true",
+        default=os.getenv("MEMLIFE_MEMORIAS_EXTRACTION", "").lower() in ("1", "true", "yes", "on"),
+        help="Enable MEMORIA structured triple extraction during reflection",
+    )
+    parser.add_argument(
+        "--polyphonic-recall",
+        action="store_true",
+        default=os.getenv("MEMLIFE_POLYPHONIC_RECALL", "").lower() in ("1", "true", "yes", "on"),
+        help="Enable polyphonic (multi-source blended) recall",
+    )
+    parser.add_argument(
         "--log-level", default=os.getenv("MEMLIFE_LOG_LEVEL", "INFO"),
         help="Log level (default: INFO)",
     )
@@ -586,6 +608,8 @@ def main():
         critic_model=args.critic_model,
         reflection_timeout=args.reflection_timeout,
         reflection_total_timeout=args.reflection_total_timeout,
+        memorias_extraction=args.memorias_extraction,
+        polyphonic_recall=args.polyphonic_recall,
     )
 
     resolved_db = server._memlife_store.db_path  # type: ignore[attr-defined]
