@@ -383,7 +383,7 @@ class FactStore:
             query_vector = (await self.embed_texts([query]) or [None])[0]  # type: ignore[arg-type]
         if query_vector is not None:
             facts_with_vec = self._facts_with_embeddings()
-            if self.config.use_sqlite_vec:
+            if self.vector_backend.name == "sqlite_vec":
                 return await self._recall_facts_sqlite_vec(
                     query_vector, facts_with_vec, limit
                 )
