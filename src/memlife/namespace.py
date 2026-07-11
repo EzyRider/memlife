@@ -15,6 +15,9 @@ _MAX_NAMESPACE_LEN = 64
 _FORBIDDEN = ("/", "\\", "..", "\x00")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
+# Reserved namespace names that cannot be used for user namespaces.
+_RESERVED_NAMESPACES = frozenset({"_default"})
+
 
 def validate_namespace(name: str | None) -> str:
     """Return a safe, canonical namespace string.

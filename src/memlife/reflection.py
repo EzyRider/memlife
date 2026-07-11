@@ -28,6 +28,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 
 from memlife.store import MemoryStore
@@ -36,6 +37,22 @@ from memlife.vectors import cosine
 from memlife import memorias
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ReflectionPass:
+    """Persisted record of one reflection pass."""
+
+    id: str
+    created_at: float
+    episode_ids: list[str]
+    proposed: list[dict]
+    kept: list[dict]
+    dropped: list[dict]
+    model_used: str
+    critic_model_used: str | None
+    total_timeout: float
+    elapsed_seconds: float
 
 
 @dataclass
@@ -187,6 +204,7 @@ class Reflector:
 
     async def _reflect_inner(self, since: float | None, max_episodes: int) -> ReflectionResult:
         """Core reflection logic (called inside the total-timeout wrapper)."""
+        start_time = time.time()
         episodes = self._gather_episodes(since, max_episodes)
         if not episodes:
             logger.info("Reflection: no new episodes to reflect on.")
@@ -297,6 +315,28 @@ class Reflector:
         for ep_id in ep_ids:
             self.memory.mark_reflected(ep_id)
 
+        # ── Persist reflection pass for audit ──────────────────────────
+        elapsed = time.time() - start_time
+        pass_id = f"rp_{uuid.uuid4().hex[:12]}"
+        proposed = (
+            parsed.observations + parsed.hypotheses + parsed.revisions + parsed.dropped
+        )
+        kept = parsed.observations + parsed.hypotheses + parsed.revisions
+        self.memory.record_reflection_pass(
+            ReflectionPass(
+                id=pass_id,
+                created_at=start_time,
+                episode_ids=ep_ids,
+                proposed=proposed,
+                kept=kept,
+                dropped=parsed.dropped,
+                model_used=self.model_name,
+                critic_model_used=self.critic_model or None,
+                total_timeout=self.total_timeout,
+                elapsed_seconds=elapsed,
+            )
+        )
+
         # ── Record continuity metrics ──────────────────────────────────
         all_kept = parsed.observations + parsed.hypotheses + parsed.revisions
         all_proposed = len(all_kept) + len(parsed.dropped)
@@ -406,10 +446,23 @@ class Reflector:
             "}\n"
             "No prose outside the JSON. No markdown fences."
         )
+        # MV2-0.5.0: include recent user corrections so the reflector does
+        # not repeat beliefs the user has already rejected.
+        corrections = self.memory.recent_user_corrections(limit=5)
+        correction_lines = (
+            "\n".join(
+                f"- [{c.id}] {c.content}"
+                for c in corrections
+            )
+            or "(none yet)"
+        )
+
         user = (
             f"Today's episodes (ids: {ep_id_list}):\n{ep_lines}\n\n"
             f"Prior journal:\n{j_lines}\n\n"
             f"{hist_lines}"
+            f"User corrections (these override prior journal entries):\n"
+            f"{correction_lines}\n\n"
             "Write the journal for today. Consider both recent and historical "
             "context. If you notice long-term patterns (recurring themes, "
             "shifts over time, things that have been true for a while and "

@@ -63,7 +63,7 @@ def _make_embedder(embedder_type: str, model: str, base_url: str):
 def create_server(
     db_path: str = "",
     data_dir: str = "./memlife_data",
-    namespace: str = "default",
+    namespace: str = "_default",
     embedder_type: str = "dummy",
     embedding_model: str = "dummy",
     base_url: str = "http://localhost:11434",
@@ -441,8 +441,8 @@ def main():
         help="Root directory for namespace databases (default: ./memlife_data)",
     )
     parser.add_argument(
-        "--namespace", default=os.getenv("MEMLIFE_NAMESPACE", "default"),
-        help="Namespace for this server instance (default: default)",
+        "--namespace", default=os.getenv("MEMLIFE_NAMESPACE", "_default"),
+        help="Namespace for this server instance (default: _default)",
     )
     parser.add_argument(
         "--embedder", default=os.getenv("MEMLIFE_EMBEDDER", "dummy"),

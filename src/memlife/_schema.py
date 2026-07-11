@@ -120,6 +120,20 @@ class SchemaMixin:
                 total_facts INTEGER DEFAULT 0,
                 total_episodes INTEGER DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS reflection_passes (
+                id TEXT PRIMARY KEY,
+                created_at REAL NOT NULL,
+                episode_ids_json TEXT DEFAULT '[]',
+                proposed_json TEXT DEFAULT '[]',
+                kept_json TEXT DEFAULT '[]',
+                dropped_json TEXT DEFAULT '[]',
+                model_used TEXT DEFAULT '',
+                critic_model_used TEXT DEFAULT '',
+                total_timeout REAL DEFAULT 0,
+                elapsed_seconds REAL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_reflection_passes_created
+                ON reflection_passes(created_at);
             CREATE TABLE IF NOT EXISTS episode_tools (
                 episode_id TEXT NOT NULL,
                 tool_name TEXT NOT NULL,
@@ -237,6 +251,26 @@ class SchemaMixin:
             "UPDATE facts SET confidence = ? WHERE confidence > ? AND superseded_by = ''",
             (MAX_FACT_CONFIDENCE, MAX_FACT_CONFIDENCE),
         )
+
+        # Reflection audit table: added in 0.5.0.  Idempotent for existing DBs.
+        rpass_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(reflection_passes)")}
+        if not rpass_cols:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS reflection_passes (
+                    id TEXT PRIMARY KEY,
+                    created_at REAL NOT NULL,
+                    episode_ids_json TEXT DEFAULT '[]',
+                    proposed_json TEXT DEFAULT '[]',
+                    kept_json TEXT DEFAULT '[]',
+                    dropped_json TEXT DEFAULT '[]',
+                    model_used TEXT DEFAULT '',
+                    critic_model_used TEXT DEFAULT '',
+                    total_timeout REAL DEFAULT 0,
+                    elapsed_seconds REAL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_reflection_passes_created
+                    ON reflection_passes(created_at);
+            """)
 
         # Embedding model versioning: add embedding_model column to all
         # three tables so we can detect when the model changes and trigger

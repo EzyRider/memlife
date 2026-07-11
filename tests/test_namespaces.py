@@ -21,7 +21,7 @@ class TestNamespaceResolution:
         config = MemoryConfig()
         store = MemoryStore(config=config)
         assert store.db_path.endswith(
-            os.path.join("memlife_data", "default", "memlife.db")
+            os.path.join("memlife_data", "_default", "memlife.db")
         )
 
     def test_custom_namespace(self):
@@ -88,7 +88,7 @@ class TestNamespaceIsolation:
 
     async def test_default_namespace_isolated(self, tmp_root):
         default_store = MemoryStore(
-            config=MemoryConfig(data_dir=tmp_root, namespace="default")
+            config=MemoryConfig(data_dir=tmp_root, namespace="_default")
         )
         other_store = MemoryStore(
             config=MemoryConfig(data_dir=tmp_root, namespace="other")

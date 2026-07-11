@@ -295,9 +295,12 @@ class JournalStore:
         return [j for s, j in scored[:limit] if s > 0.0]
 
     def search_journal(self, query: str, limit: int = 10) -> list[JournalEntry]:
-        """Keyword search over active journal entries (observations and
-        hypotheses only, no contradictions). Used by the memory_search_journal
-        tool so the agent can pull relevant past reflections."""
+        """Keyword search over active journal entries (observations,
+        hypotheses, and user corrections; no contradictions).
+
+        Used by the memory_search_journal tool so the agent can pull
+        relevant past reflections.
+        """
         tokens = self._tokenize(query)
         if not tokens:
             return self.journal_recent(limit=limit)
@@ -307,7 +310,8 @@ class JournalStore:
             f"SELECT id, type, content, confidence, source_episodes_json, "
             f"private, created_at, superseded_by, embedding_json, "
             f"last_detected, annotations_json, links_json FROM journal "
-            f"WHERE superseded_by = '' AND type IN ('observation', 'hypothesis') "
+            f"WHERE superseded_by = '' "
+            f"AND type IN ('observation', 'hypothesis', 'user_correction') "
             f"AND ({clauses}) "
             f"ORDER BY created_at DESC LIMIT ?",
             (*params, limit * 4),
@@ -478,6 +482,50 @@ class JournalStore:
             self.retire_journal(jid, reason="stale-contradiction")
             retired_ids.append(jid)
         return retired_ids
+
+    def add_user_correction(
+        self,
+        target_id: str,
+        corrected_content: str,
+        *,
+        confidence: float = 0.95,
+        source: str = "user",
+    ) -> str:
+        """Record a user correction that supersedes a prior journal entry.
+
+        Creates a new ``user_correction`` journal entry and marks the target
+        as superseded.  Corrections are retrieved into future reflection
+        prompts with high weight so the same mistake is not repeated.
+        """
+        if not corrected_content or not corrected_content.strip():
+            raise ValueError("corrected_content cannot be empty")
+        corrected_content = corrected_content.strip()
+        now = time.time()
+        jid = f"jrn_{uuid.uuid4().hex[:12]}"
+        self.conn.execute(
+            "INSERT INTO journal (id, type, content, confidence, "
+            "source_episodes_json, private, created_at, last_detected) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (jid, "user_correction", corrected_content, confidence,
+             json.dumps([target_id]), 1, now, 0),
+        )
+        self.conn.commit()
+        self.supersede_journal(target_id, jid)
+        return jid
+
+    def recent_user_corrections(
+        self, limit: int = 10
+    ) -> list[JournalEntry]:
+        """Active user corrections, newest first."""
+        rows = self.conn.execute(
+            "SELECT id, type, content, confidence, source_episodes_json, "
+            "private, created_at, superseded_by, embedding_json, last_detected, "
+            "annotations_json, links_json FROM journal "
+            "WHERE superseded_by = '' AND type = 'user_correction' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._journal_from_row(r) for r in rows]
 
     def _journal_from_row(self, r) -> JournalEntry:
         return JournalEntry(

@@ -5,6 +5,7 @@ Extracted from store.py as part of the mixin refactor.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -60,6 +61,105 @@ class GCMixin:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def record_reflection_pass(self, pass_obj) -> str:
+        """Persist a :class:`memlife.reflection.ReflectionPass`.
+
+        The ``pass_obj`` may be a dict or a dataclass instance.  Returns the
+        pass id.
+        """
+        if hasattr(pass_obj, "__dict__"):
+            data = pass_obj.__dict__
+        else:
+            data = dict(pass_obj)
+        pid = data.get("id") or f"rp_{uuid.uuid4().hex[:12]}"
+        self.conn.execute(
+            "INSERT INTO reflection_passes (id, created_at, episode_ids_json, "
+            "proposed_json, kept_json, dropped_json, model_used, "
+            "critic_model_used, total_timeout, elapsed_seconds) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                pid,
+                data.get("created_at", time.time()),
+                json.dumps(data.get("episode_ids", [])),
+                json.dumps(data.get("proposed", [])),
+                json.dumps(data.get("kept", [])),
+                json.dumps(data.get("dropped", [])),
+                data.get("model_used", ""),
+                data.get("critic_model_used") or "",
+                data.get("total_timeout", 0.0),
+                data.get("elapsed_seconds", 0.0),
+            ),
+        )
+        self.conn.commit()
+        self._prune_reflection_passes()
+        return pid
+
+    def reflection_audit(
+        self,
+        *,
+        limit: int = 20,
+        before: float | None = None,
+        after: float | None = None,
+    ) -> list[dict]:
+        """Return paginated reflection pass records for debugging.
+
+        Passes are returned newest first.  ``before``/``after`` filter by
+        ``created_at`` (exclusive).
+        """
+        where = []
+        params: list = []
+        if before is not None:
+            where.append("created_at < ?")
+            params.append(before)
+        if after is not None:
+            where.append("created_at > ?")
+            params.append(after)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        rows = self.conn.execute(
+            f"SELECT * FROM reflection_passes {where_sql} "
+            f"ORDER BY created_at DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            for key in ("episode_ids_json", "proposed_json", "kept_json", "dropped_json"):
+                try:
+                    d[key.replace("_json", "")] = json.loads(d[key] or "[]")
+                except json.JSONDecodeError:
+                    d[key.replace("_json", "")] = []
+                del d[key]
+            result.append(d)
+        return result
+
+    def last_reflection_pass(self) -> dict | None:
+        """Return the most recent reflection pass, or None."""
+        rows = self.reflection_audit(limit=1)
+        return rows[0] if rows else None
+
+    def _prune_reflection_passes(self) -> None:
+        """Cap reflection pass history by count and age.
+
+        Uses ``reflection_pass_retention_count`` and
+        ``reflection_pass_retention_days`` from ``self.config``.
+        """
+        count_cap = getattr(self.config, "reflection_pass_retention_count", 100)
+        days_cap = getattr(self.config, "reflection_pass_retention_days", 90)
+        if count_cap > 0:
+            self.conn.execute(
+                "DELETE FROM reflection_passes WHERE id NOT IN ("
+                "  SELECT id FROM reflection_passes ORDER BY created_at DESC LIMIT ?"
+                ")",
+                (count_cap,),
+            )
+        if days_cap > 0:
+            cutoff = time.time() - (days_cap * 86400)
+            self.conn.execute(
+                "DELETE FROM reflection_passes WHERE created_at < ?",
+                (cutoff,),
+            )
+        self.conn.commit()
 
     def run_gc(
         self,

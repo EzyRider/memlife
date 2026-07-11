@@ -64,6 +64,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         embedder: Embedder | None = None,
     ):
         config = config or MemoryConfig()
+        config.validate()
         self.db_path = config.db_path or self._resolve_db_path(config)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedder
@@ -74,7 +75,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
     @staticmethod
     def _resolve_db_path(config: MemoryConfig) -> str:
         """Resolve namespace layout when db_path is not explicitly set."""
-        namespace = validate_namespace(config.namespace or "default")
+        namespace = validate_namespace(config.namespace or "_default")
         data_dir = Path(config.data_dir or "./memlife_data")
         return str(data_dir / namespace / "memlife.db")
 

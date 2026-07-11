@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+from memlife.namespace import validate_namespace
+
+
+# Vector backends supported by memlife.
+VECTOR_BACKENDS = frozenset({"json", "sqlite_vec", "sqlite-vec"})
 
 
 @dataclass
@@ -22,8 +29,12 @@ class MemoryConfig:
     # Namespace layout.  When db_path is not set explicitly, the store resolves
     # to data_dir / namespace / "memlife.db".  This gives each user a fully
     # isolated SQLite file while keeping the public API unchanged.
+    #
+    # The default namespace is "_default" (reserved).  It preserves the pre-0.5.0
+    # single-file-per-agent mental model and is the safe fallback when no
+    # namespace is configured.
     data_dir: str = "./memlife_data"
-    namespace: str = "default"
+    namespace: str = "_default"
 
     # SQLite pragmas — WAL + busy_timeout protect against corruption under
     # concurrent writers (MF-002). Both on by default, overridable via env.
@@ -94,6 +105,10 @@ class MemoryConfig:
     # re-detected in N reflection passes (MF-004). 0 disables retirement.
     contradiction_retirement_cycles: int = 14
 
+    # Reflection audit retention (MV2-0.5.0).  0 disables pruning.
+    reflection_pass_retention_count: int = 100
+    reflection_pass_retention_days: int = 90
+
     # GC retention (days)
     gc_superseded_facts_days: int = 90
     gc_superseded_journal_days: int = 90
@@ -115,6 +130,55 @@ class MemoryConfig:
     # compatibility, but ``vector_backend`` takes precedence when set.
     vector_backend: str = "json"
 
+    def validate(self) -> None:
+        """Fail fast on configuration that would break store init.
+
+        Raises NamespaceError or ValueError with a clear message before any
+        SQLite file is opened.
+        """
+        # Namespace must be valid.  We validate the canonical (lowercased) form
+        # so the user gets the same result whether they typed "Julie" or "julie".
+        validate_namespace(self.namespace)
+
+        # Vector backend must be a known value.  The store normalises
+        # "sqlite-vec" to "sqlite_vec" internally.
+        backend = self.vector_backend
+        if backend is not None:
+            backend = backend.strip().lower()
+            if backend == "sqlite-vec":
+                backend = "sqlite_vec"
+            if backend not in VECTOR_BACKENDS:
+                raise ValueError(
+                    f"unknown vector_backend: {self.vector_backend!r}. "
+                    f"Supported: json, sqlite_vec"
+                )
+
+        # db_path, when explicit, must not be a directory.
+        if self.db_path:
+            p = Path(self.db_path)
+            if p.exists() and p.is_dir():
+                raise ValueError(
+                    f"db_path points to a directory: {self.db_path!r}"
+                )
+
+        # Busy timeout must be non-negative.
+        if self.sqlite_busy_timeout_ms < 0:
+            raise ValueError("sqlite_busy_timeout_ms must be >= 0")
+
+        # Decay / threshold invariants.
+        if not (0 < self.recency_halflife_days):
+            raise ValueError("recency_halflife_days must be > 0")
+        if not (0 < self.fact_decay_halflife_days):
+            raise ValueError("fact_decay_halflife_days must be > 0")
+        if not (0 < self.episode_decay_halflife_days):
+            raise ValueError("episode_decay_halflife_days must be > 0")
+        if not (0 < self.journal_decay_halflife_days):
+            raise ValueError("journal_decay_halflife_days must be > 0")
+        if not (0 <= self.fact_merge_threshold <= 1):
+            raise ValueError("fact_merge_threshold must be in [0, 1]")
+        if not (0 <= self.fact_conflict_threshold <= 1):
+            raise ValueError("fact_conflict_threshold must be in [0, 1]")
+
     @classmethod
     def from_env(cls) -> "MemoryConfig":
         """Load from environment variables with MEMLIFE_ prefix."""
@@ -129,7 +193,7 @@ class MemoryConfig:
         return cls(
             db_path=os.getenv("MEMLIFE_DB_PATH", ""),
             data_dir=os.getenv("MEMLIFE_DATA_DIR", "./memlife_data"),
-            namespace=os.getenv("MEMLIFE_NAMESPACE", "default"),
+            namespace=os.getenv("MEMLIFE_NAMESPACE", "_default"),
             sqlite_journal_mode=os.getenv("MEMLIFE_SQLITE_JOURNAL_MODE", "WAL"),
             sqlite_busy_timeout_ms=int(os.getenv("MEMLIFE_SQLITE_BUSY_TIMEOUT_MS", "5000")),
             embedding_model=os.getenv("MEMLIFE_EMBEDDING_MODEL", ""),
