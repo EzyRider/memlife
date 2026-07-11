@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-11
+
+### Fixed
+
+- `memlife-mcp-server` now accepts `--vector-backend {json,sqlite_vec,binary}`
+  and falls back to `MEMLIFE_VECTOR_BACKEND`. Previously backend selection
+  required the environment variable; the CLI wrapper had no equivalent flag.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added
