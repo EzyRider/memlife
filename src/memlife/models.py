@@ -198,6 +198,9 @@ class Metrics:
     # Recall diagnostics
     recall: dict = field(default_factory=dict)
 
+    # Schema migration health
+    migration: dict = field(default_factory=dict)
+
 
 @dataclass
 class JournalEntry:

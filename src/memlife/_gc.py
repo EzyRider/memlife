@@ -463,5 +463,6 @@ class GCMixin:
             total_retired=summary.get("total_retired", 0),
             total_merged=summary.get("total_merged", 0),
             recall=recall,
+            migration=self.migration_status(),
         )
 

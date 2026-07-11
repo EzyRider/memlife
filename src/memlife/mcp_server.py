@@ -435,6 +435,7 @@ def create_server(
                 "total_merged": metrics.total_merged,
             },
             "recall": metrics.recall,
+            "migration": metrics.migration,
         }, indent=2, default=str)
 
     @mcp.resource("memlife://health")
