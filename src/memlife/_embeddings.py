@@ -184,7 +184,7 @@ class EmbedMixin:
                 if vec:
                     self.conn.execute(
                         "UPDATE facts SET embedding_json = ?, embedding_model = ? WHERE id = ?",
-                        (json.dumps(vec), self.embedding_model_name, row[0]),
+                        (self._serialize_vec(vec), self.embedding_model_name, row[0]),
                     )
                     results["facts_embedded"] += 1
                 else:
@@ -228,7 +228,7 @@ class EmbedMixin:
                 if vec:
                     self.conn.execute(
                         "UPDATE journal SET embedding_json = ?, embedding_model = ? WHERE id = ?",
-                        (json.dumps(vec), self.embedding_model_name, row[0]),
+                        (self._serialize_vec(vec), self.embedding_model_name, row[0]),
                     )
                     results["journal_embedded"] += 1
                 else:
@@ -253,7 +253,7 @@ class EmbedMixin:
                 if vec:
                     self.conn.execute(
                         "UPDATE episodes SET embedding_json = ?, embedding_model = ? WHERE id = ?",
-                        (json.dumps(vec), self.embedding_model_name, row[0]),
+                        (self._serialize_vec(vec), self.embedding_model_name, row[0]),
                     )
                     results["episodes_embedded"] += 1
                 else:
