@@ -75,6 +75,7 @@ def create_server(
     reflection_total_timeout: float = 0.0,
     memorias_extraction: bool = False,
     polyphonic_recall: bool = False,
+    log_tool_calls: bool = False,
 ):
     """Create and configure a FastMCP server with memlife tools.
 
@@ -101,6 +102,9 @@ def create_server(
     config = MemoryConfig(**config_kwargs)
     embedder = _make_embedder(embedder_type, embedding_model, base_url)
     store = MemoryStore(config=config, embedder=embedder)
+
+    # Tool-call logging state.
+    _logged_tool_calls: dict[tuple[str, str], float] = {}
 
     # Lazy-init: Reflector and chat adapter created on first reflect() call.
     _reflector = None
@@ -145,6 +149,28 @@ def create_server(
 
     # MV2-010: graph/triples tools are registered alongside memory tools.
 
+    def _log_tool_call(tool_name: str, outcome: str, summary: str) -> None:
+        """Optionally record a state-changing MCP tool call as an episode."""
+        if not log_tool_calls:
+            return
+        try:
+            import time
+            key = (tool_name, outcome)
+            now = time.time()
+            last = _logged_tool_calls.get(key)
+            if last and outcome == "success" and (now - last) < 60:
+                return
+            _logged_tool_calls[key] = now
+            store.remember(
+                task=f"Tool call: {tool_name}",
+                outcome=outcome,
+                summary=summary[:500],
+                tool_calls=[{"tool": tool_name, "outcome": outcome}],
+            )
+        except Exception as exc:
+            logger.debug("tool-call episode logging failed: %s", exc)
+
+
     @mcp.tool()
     async def memory_store(
         content: str,
@@ -160,6 +186,7 @@ def create_server(
             confidence: Confidence 0.0-1.0.
         """
         fact_id = await store.store_fact(content, source=source, confidence=confidence)
+        _log_tool_call("memory_store", "success", f"stored fact {fact_id}")
         return f"Stored fact {fact_id}: {content}"
 
     @mcp.tool()
@@ -290,6 +317,7 @@ def create_server(
             confidence: Confidence 0.0-1.0.
         """
         triple_id = store.store_triple(subject, predicate, object, confidence=confidence)
+        _log_tool_call("memory_store_triple", "success", f"stored triple {triple_id}")
         return f"Stored triple {triple_id}: {subject} {predicate} {object}"
 
     @mcp.tool()
@@ -401,6 +429,13 @@ def create_server(
             logger.error("Reflection failed: %s", e, exc_info=True)
             return f"Reflection failed: {e}"
 
+        _log_tool_call(
+            "memory_reflect",
+            "success",
+            f"reflected {len(result.episode_ids)} episodes, "
+            f"{len(result.observations)} observations, "
+            f"{len(result.contradictions)} contradictions",
+        )
         parts = [
             "Reflection complete.\n"
             f"  Episodes reflected: {len(result.episode_ids)}",
@@ -588,6 +623,12 @@ def main():
         help="Enable polyphonic (multi-source blended) recall",
     )
     parser.add_argument(
+        "--log-tool-calls",
+        action="store_true",
+        default=os.getenv("MEMLIFE_LOG_TOOL_CALLS", "").lower() in ("1", "true", "yes", "on"),
+        help="Record state-changing tool calls as memlife episodes with tool_name",
+    )
+    parser.add_argument(
         "--log-level", default=os.getenv("MEMLIFE_LOG_LEVEL", "INFO"),
         help="Log level (default: INFO)",
     )
@@ -609,6 +650,7 @@ def main():
         reflection_total_timeout=args.reflection_total_timeout,
         memorias_extraction=args.memorias_extraction,
         polyphonic_recall=args.polyphonic_recall,
+        log_tool_calls=args.log_tool_calls,
     )
 
     resolved_db = server._memlife_store.db_path  # type: ignore[attr-defined]

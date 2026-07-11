@@ -216,10 +216,30 @@ def test_create_server_feature_flags(tmp_path):
         embedding_model="dummy",
         memorias_extraction=True,
         polyphonic_recall=True,
+        log_tool_calls=True,
     )
     cfg = mcp._memlife_store.config
     assert cfg.memorias_extraction is True
     assert cfg.use_polyphonic_recall is True
+    mcp._memlife_store.close()
+
+
+@pytest.mark.asyncio
+async def test_memory_store_logs_episode_when_enabled(tmp_path):
+    """With log_tool_calls=True, memory_store creates a tool episode."""
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_log.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        log_tool_calls=True,
+    )
+    store = mcp._memlife_store
+    manager = mcp._tool_manager
+    fn = manager._tools.get("memory_store") if hasattr(manager, '_tools') else None
+    if fn is not None:
+        await fn.fn(content="log test fact", source="agent", confidence=0.7)
+        eps = store.search_episodes_by_tool("memory_store", limit=5)
+        assert any("memory_store" in str(e.task) for e in eps)
     mcp._memlife_store.close()
 
 
