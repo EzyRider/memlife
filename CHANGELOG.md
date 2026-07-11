@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-11
+
+### Fixed
+
+- `MemoryConfig.validate()` no longer returns early when `vector_backend` is
+  `None`. The default auto-resolution (None) was introduced in 0.5.2, but the
+  existing `if backend is None: return` guard caused most validation checks to
+  be skipped for any config that did not explicitly set a backend.
+- `BinaryVectorBackend.deserialize()` and `_unpack()` now fall back to
+  JSON-decoding stored vectors. Switching an existing store from the default
+  JSON backend to the binary backend no longer makes previously stored vectors
+  invisible to search.
+
+### Added
+
+- Regression tests for `validate()` running all checks with `vector_backend=None`.
+- Regression test for binary backend reading vectors stored as JSON by the
+  default backend.
+
 ## [0.5.2] - 2026-07-11
 
 ### Fixed

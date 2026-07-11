@@ -32,7 +32,7 @@ from memlife.vector_backends import (
     create_vector_backend,
 )
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 __all__ = [
     "MemoryStore",
