@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from memlife.store import MemoryStore
 from memlife.config import MemoryConfig
 from memlife.vectors import cosine
+from memlife import memorias
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,23 @@ class Reflector:
             parsed = await self._critique(parsed, episodes)
 
         await self._store(parsed)
+
+        # Structured MEMORIA extraction: if enabled, scan the raw reflection
+        # output for explicit facts/preferences/instructions/timelines/KG
+        # triples and persist them. KG triples are anchored to the reflection
+        # episode(s) that produced them so provenance is preserved.
+        memorias_stored: dict = {}
+        if self.memory.config.memorias_extraction:
+            memorias_stored = await memorias.persist_extraction(
+                self.memory, parsed.raw, source="reflection"
+            )
+            # Record episode provenance on extracted triples.
+            for tid, *_ in memorias_stored.get("kg_triples", []):
+                self.memory._add_triple_provenance(
+                    tid,
+                    [{"kind": "episode", "id": ep_id} for ep_id in ep_ids],
+                )
+
         parsed.consolidation = self.memory.consolidate_journal(
             halflife_days=self.decay_halflife_days,
             floor=self.decay_floor,

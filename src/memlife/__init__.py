@@ -55,4 +55,5 @@ __all__ = [
 from memlife.retrieval import retrieve
 from memlife.gc import run_gc
 from memlife.io import export_jsonl, import_jsonl
+from memlife import memorias
 

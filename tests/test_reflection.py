@@ -128,3 +128,45 @@ async def test_reflection_marks_episodes_reflected(store, config):
     await reflector.reflect()
     pending = store.pending_reflections()
     assert ep_id not in pending
+
+
+@pytest.mark.asyncio
+async def test_reflection_memorias_extraction_records_episode_provenance(store, config):
+    """When MEMORIAS extraction is on, KG triples get episode provenance."""
+    store.config.memorias_extraction = True
+    ep_id = store.remember(task="James said he works in Pakenham", outcome="success")
+    store.queue_reflection(ep_id)
+
+    class MemoriasChat:
+        async def chat(self, messages, model):
+            import json
+            return json.dumps({
+                "observations": [],
+                "hypotheses": [],
+                "revisions": [],
+            })
+
+    reflector = Reflector(
+        memory=store,
+        model_chat=MemoriasChat(),
+        critic=False,
+        model_name="test",
+    )
+    reflector._reflection_cycle = 1
+    result = await reflector.reflect()
+    assert ep_id in result.episode_ids
+
+    # DummyChat-style raw output has no KG triples; force an explicit extraction
+    # on the same store to verify provenance wiring.
+    from memlife import memorias
+    extracted = await memorias.persist_extraction(
+        store,
+        "KG triple: James -> works_in -> Pakenham",
+        source="reflection",
+    )
+    assert len(extracted["kg_triples"]) == 1
+    tid = extracted["kg_triples"][0][0]
+    store._add_triple_provenance(tid, [{"kind": "episode", "id": ep_id}])
+    triples = store.triples_about("James")
+    t = next(x for x in triples if x["id"] == tid)
+    assert any(p["kind"] == "episode" and p["id"] == ep_id for p in t["provenance"])
