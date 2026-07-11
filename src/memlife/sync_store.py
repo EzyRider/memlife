@@ -166,3 +166,27 @@ class SyncMemoryStore:
 
     def backfill_embeddings(self, batch_size: int = 20) -> dict:
         return self._run(self._store.backfill_embeddings(batch_size))
+
+    def store_triple(self, subject: str, predicate: str, object: str,
+                     confidence: float = 0.8) -> str:
+        return self._store.store_triple(subject, predicate, object, confidence=confidence)
+
+    def triples_about(self, entity: str, predicate: str | None = None, limit: int = 20):
+        return self._store.triples_about(entity, predicate=predicate, limit=limit)
+
+    def triples_from(self, entity: str, predicate: str | None = None, limit: int = 20):
+        return self._store.triples_from(entity, predicate=predicate, limit=limit)
+
+    def triples_to(self, entity: str, predicate: str | None = None, limit: int = 20):
+        return self._store.triples_to(entity, predicate=predicate, limit=limit)
+
+    def entity_neighbors(self, entity: str, predicate: str | None = None,
+                         depth: int = 1, limit: int = 100):
+        return self._store.entity_neighbors(entity, predicate=predicate,
+                                            depth=depth, limit=limit)
+
+    def add_entity_alias(self, canonical_name: str, alias: str) -> bool:
+        return self._store.add_entity_alias(canonical_name, alias)
+
+    def resolve_entity(self, name: str) -> str | None:
+        return self._store.resolve_entity(name)

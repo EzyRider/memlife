@@ -144,8 +144,36 @@ class SchemaMixin:
             );
             CREATE INDEX IF NOT EXISTS idx_triples_subject_predicate
                 ON temporal_triples(subject, predicate, valid_from);
+            CREATE INDEX IF NOT EXISTS idx_triples_object
+                ON temporal_triples(object);
+            CREATE INDEX IF NOT EXISTS idx_triples_predicate
+                ON temporal_triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_fact
                 ON temporal_triples(fact_id);
+
+            -- Entity normalization and aliases (MV2-010)
+            CREATE TABLE IF NOT EXISTS entities (
+                canonical_name TEXT PRIMARY KEY,
+                aliases_json TEXT DEFAULT '[]',
+                created_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS entity_aliases (
+                alias TEXT PRIMARY KEY,
+                canonical_name TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_entity_aliases_canonical
+                ON entity_aliases(canonical_name);
+
+            -- Triple provenance: which episode/fact/journal asserted a triple
+            CREATE TABLE IF NOT EXISTS triple_provenance (
+                triple_id TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (triple_id, source_kind, source_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_provenance_source
+                ON triple_provenance(source_kind, source_id);
         """)
         self.conn.commit()
 
@@ -221,7 +249,8 @@ class SchemaMixin:
                     f"ALTER TABLE {table} ADD COLUMN embedding_model TEXT DEFAULT ''"
                 )
 
-        # MV2-003: ensure temporal_triples table exists in existing databases.
+        # MV2-003 / MV2-010: ensure temporal_triples, entity, and provenance
+        # tables exist in existing databases.
         tcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(temporal_triples)")}
         if not tcols:
             self.conn.executescript("""
@@ -238,8 +267,61 @@ class SchemaMixin:
                 );
                 CREATE INDEX IF NOT EXISTS idx_triples_subject_predicate
                     ON temporal_triples(subject, predicate, valid_from);
+                CREATE INDEX IF NOT EXISTS idx_triples_object
+                    ON temporal_triples(object);
+                CREATE INDEX IF NOT EXISTS idx_triples_predicate
+                    ON temporal_triples(predicate);
                 CREATE INDEX IF NOT EXISTS idx_triples_fact
                     ON temporal_triples(fact_id);
+
+                CREATE TABLE IF NOT EXISTS entities (
+                    canonical_name TEXT PRIMARY KEY,
+                    aliases_json TEXT DEFAULT '[]',
+                    created_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS entity_aliases (
+                    alias TEXT PRIMARY KEY,
+                    canonical_name TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_entity_aliases_canonical
+                    ON entity_aliases(canonical_name);
+
+                CREATE TABLE IF NOT EXISTS triple_provenance (
+                    triple_id TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (triple_id, source_kind, source_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_provenance_source
+                    ON triple_provenance(source_kind, source_id);
+            """)
+
+        # MV2-010: ensure entity/provenance tables exist even if temporal_triples
+        # was created before this migration step.
+        if tcols:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS entities (
+                    canonical_name TEXT PRIMARY KEY,
+                    aliases_json TEXT DEFAULT '[]',
+                    created_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS entity_aliases (
+                    alias TEXT PRIMARY KEY,
+                    canonical_name TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_entity_aliases_canonical
+                    ON entity_aliases(canonical_name);
+
+                CREATE TABLE IF NOT EXISTS triple_provenance (
+                    triple_id TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (triple_id, source_kind, source_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_provenance_source
+                    ON triple_provenance(source_kind, source_id);
             """)
 
         # MV2-008: ensure episode gap-marker flag exists in existing databases.

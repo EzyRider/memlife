@@ -12,6 +12,9 @@ Tools exposed:
     memory_search        — Search facts by query
     memory_search_journal    — Search journal entries
     memory_search_episodes   — Search episodes by keyword or tool name
+    memory_store_triple      — Store a subject-predicate-object triple
+    memory_search_triples    — Search triples connected to an entity
+    memory_entity_neighbors  — Explore graph neighbors of an entity
     memory_revise       — Revise an existing fact
     memory_expire       — Mark a fact as expired
     memory_gc           — Run garbage collection
@@ -119,6 +122,8 @@ def create_server(
     mcp = FastMCP("memlife")
 
     # ── Tools ──────────────────────────────────────────────────────
+
+    # MV2-010: graph/triples tools are registered alongside memory tools.
 
     @mcp.tool()
     async def memory_store(
@@ -241,6 +246,83 @@ def create_server(
             query: What to look for.
         """
         return await store.retrieve(query)
+
+    @mcp.tool()
+    def memory_store_triple(
+        subject: str,
+        predicate: str,
+        object: str,
+        confidence: float = 0.8,
+    ) -> str:
+        """Store a subject-predicate-object triple in the knowledge graph.
+
+        Useful for explicit entity relationships (e.g. person-knows-person,
+        user-works_at-place). Aliases are resolved to canonical entity names.
+
+        Args:
+            subject: The entity the relationship starts from.
+            predicate: The relationship type.
+            object: The entity the relationship points to.
+            confidence: Confidence 0.0-1.0.
+        """
+        triple_id = store.store_triple(subject, predicate, object, confidence=confidence)
+        return f"Stored triple {triple_id}: {subject} {predicate} {object}"
+
+    @mcp.tool()
+    def memory_search_triples(
+        entity: str,
+        predicate: str = "",
+        limit: int = 10,
+    ) -> str:
+        """Search triples connected to an entity.
+
+        Returns triples where the entity appears as subject or object.
+        Pass predicate to filter by relationship type.
+
+        Args:
+            entity: Entity to search around.
+            predicate: Optional relationship filter.
+            limit: Max results.
+        """
+        triples = store.triples_about(
+            entity, predicate=predicate or None, limit=limit,
+        )
+        if not triples:
+            return f"No triples found for '{entity}'."
+        lines = [
+            f"[{i+1}] {t['subject']} {t['predicate']} {t['object']} (conf={t['confidence']:.2f})"
+            for i, t in enumerate(triples)
+        ]
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def memory_entity_neighbors(
+        entity: str,
+        predicate: str = "",
+        depth: int = 1,
+        limit: int = 10,
+    ) -> str:
+        """Explore the graph around an entity.
+
+        Returns neighbors reachable within ``depth`` edge-hops. Optional
+        predicate filter restricts which edges are followed.
+
+        Args:
+            entity: Starting entity.
+            predicate: Optional relationship filter.
+            depth: How many hops to follow (default 1).
+            limit: Max neighbors to return.
+        """
+        neighbors = store.entity_neighbors(
+            entity, predicate=predicate or None, depth=depth, limit=limit,
+        )
+        if not neighbors:
+            return f"No neighbors found for '{entity}'."
+        lines = [
+            f"[{i+1}] {n['entity']} (depth {n['depth']})"
+            for i, n in enumerate(neighbors)
+        ]
+        return "\n".join(lines)
 
     @mcp.tool()
     def memory_gc() -> str:
