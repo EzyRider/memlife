@@ -6,7 +6,22 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.5.3**
+**Current version: 0.5.4**
+
+## What's new in 0.5.4
+
+- **MCP reflection timeout controls.** `memlife-mcp-server` now exposes
+  `--reflection-timeout` and `--reflection-total-timeout` so reflection stays
+  within the MCP client's window on slower LLM endpoints.
+- **README tool list refreshed.** The MCP server tool list now matches the
+  actually implemented tools, including `memory_recall`, `memory_revise`, and
+  `memory_expire`.
+- **Memorias and polyphonic feature flags.** `--memorias-extraction` and
+  `--polyphonic-recall` can now be enabled from the MCP server CLI.
+- **Episode search by tool name.** `memory_search_episodes` now accepts a
+  `tool_name` filter, making it easier to audit how a specific tool was used.
+- **Vector backend default cleanup.** `--vector-backend` now defaults to `json`
+  explicitly, with clearer precedence when legacy flags are also supplied.
 
 ## What's new in 0.5.3
 
@@ -18,11 +33,6 @@ Memory that degrades gracefully. Not another pile that grows forever.
   deserialisation now falls back to JSON format for rows stored before the
   backend was switched, so changing from `json` to `binary` on an existing store
   does not make old vectors invisible to search.
-- **MCP reflection timeouts are configurable.** `memlife-mcp-server` now accepts
-  `--reflection-timeout` and `--reflection-total-timeout` to keep reflection
-  within the MCP client's window on slower LLM endpoints.
-- **Optional MCP feature flags exposed.** `--memorias-extraction` and
-  `--polyphonic-recall` can now be passed on the MCP server CLI.
 
 ## What's new in 0.5.2
 
