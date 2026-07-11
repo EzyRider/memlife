@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-07-11
+
+### Added
+
+- `memlife-mcp-server` now exposes `--reflection-timeout` and
+  `--reflection-total-timeout` CLI flags, forwarded to `MemoryConfig`.
+  This prevents `memory_reflect` from being killed by short MCP client
+  timeouts during larger reflection batches.
+- `memlife-mcp-server` now exposes `--memorias-extraction` and
+  `--polyphonic-recall` CLI flags and forwards them to `MemoryConfig`.
+- `memory_vacuum` and `memory_reflect` are now listed in the README tools
+  table.
+
+### Changed
+
+- `memory_search_episodes` tool description now clarifies that
+  `tool_name`-based search only finds episodes that were created with an
+  explicit `tool_name` (e.g. via `remember(..., tool_name=...)`). This is
+  an integration concern, not a search bug.
+- `memlife-mcp-server --vector-backend` now defaults to `json` explicitly
+  and no longer shows an empty choice in `--help` output. Behaviour is
+  unchanged because `MemoryConfig` already resolved to `json` by default.
+
 ## [0.5.3] - 2026-07-11
 
 ### Fixed
