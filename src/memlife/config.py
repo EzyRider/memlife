@@ -17,7 +17,13 @@ class MemoryConfig:
     """
 
     # Database
-    db_path: str = "./memlife.db"
+    db_path: str = ""
+
+    # Namespace layout.  When db_path is not set explicitly, the store resolves
+    # to data_dir / namespace / "memlife.db".  This gives each user a fully
+    # isolated SQLite file while keeping the public API unchanged.
+    data_dir: str = "./memlife_data"
+    namespace: str = "default"
 
     # SQLite pragmas — WAL + busy_timeout protect against corruption under
     # concurrent writers (MF-002). Both on by default, overridable via env.
@@ -114,7 +120,9 @@ class MemoryConfig:
             return val.strip().lower() in ("1", "true", "yes", "on")
 
         return cls(
-            db_path=os.getenv("MEMLIFE_DB_PATH", "./memlife.db"),
+            db_path=os.getenv("MEMLIFE_DB_PATH", ""),
+            data_dir=os.getenv("MEMLIFE_DATA_DIR", "./memlife_data"),
+            namespace=os.getenv("MEMLIFE_NAMESPACE", "default"),
             sqlite_journal_mode=os.getenv("MEMLIFE_SQLITE_JOURNAL_MODE", "WAL"),
             sqlite_busy_timeout_ms=int(os.getenv("MEMLIFE_SQLITE_BUSY_TIMEOUT_MS", "5000")),
             embedding_model=os.getenv("MEMLIFE_EMBEDDING_MODEL", ""),

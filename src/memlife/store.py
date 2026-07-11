@@ -62,10 +62,23 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         embedder: Embedder | None = None,
     ):
         config = config or MemoryConfig()
-        Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.db_path = config.db_path
+        self.db_path = config.db_path or self._resolve_db_path(config)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedder
         self.config = config
+        self._init_store_attrs(config)
+
+    @staticmethod
+    def _resolve_db_path(config: MemoryConfig) -> str:
+        """Resolve namespace layout when db_path is not explicitly set."""
+        namespace = (config.namespace or "default").strip()
+        if not namespace:
+            namespace = "default"
+        data_dir = Path(config.data_dir or "./memlife_data")
+        return str(data_dir / namespace / "memlife.db")
+
+    def _init_store_attrs(self, config: MemoryConfig) -> None:
+        """Initialise per-instance attributes after db_path is resolved."""
         # Embedding model name from config — stored with each vector for versioning.
         self.embedding_model_name: str = config.embedding_model
         # Cosine above which two facts are treated as the same fact at store

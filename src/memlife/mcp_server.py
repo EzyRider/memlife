@@ -58,7 +58,9 @@ def _make_embedder(embedder_type: str, model: str, base_url: str):
 
 
 def create_server(
-    db_path: str = "./memlife.db",
+    db_path: str = "",
+    data_dir: str = "./memlife_data",
+    namespace: str = "default",
     embedder_type: str = "dummy",
     embedding_model: str = "dummy",
     base_url: str = "http://localhost:11434",
@@ -73,6 +75,8 @@ def create_server(
 
     config = MemoryConfig(
         db_path=db_path,
+        data_dir=data_dir,
+        namespace=namespace,
         embedding_model=embedding_model if embedder_type != "dummy" else "dummy",
     )
     embedder = _make_embedder(embedder_type, embedding_model, base_url)
@@ -342,8 +346,16 @@ def main():
         description="memlife MCP server — lifecycle memory for AI agents"
     )
     parser.add_argument(
-        "--db", default=os.getenv("MEMLIFE_DB_PATH", "./memlife.db"),
-        help="Path to the SQLite database (default: ./memlife.db)",
+        "--db", default=os.getenv("MEMLIFE_DB_PATH", ""),
+        help="Path to the SQLite database. If not set, resolves to data_dir/namespace/memlife.db",
+    )
+    parser.add_argument(
+        "--data-dir", default=os.getenv("MEMLIFE_DATA_DIR", "./memlife_data"),
+        help="Root directory for namespace databases (default: ./memlife_data)",
+    )
+    parser.add_argument(
+        "--namespace", default=os.getenv("MEMLIFE_NAMESPACE", "default"),
+        help="Namespace for this server instance (default: default)",
     )
     parser.add_argument(
         "--embedder", default=os.getenv("MEMLIFE_EMBEDDER", "dummy"),
@@ -376,6 +388,8 @@ def main():
 
     server = create_server(
         db_path=args.db,
+        data_dir=args.data_dir,
+        namespace=args.namespace,
         embedder_type=args.embedder,
         embedding_model=args.embedding_model,
         base_url=args.ollama_url,
@@ -383,9 +397,10 @@ def main():
         critic_model=args.critic_model,
     )
 
+    resolved_db = server._memlife_store.db_path  # type: ignore[attr-defined]
     logger.info(
-        "memlife MCP server starting (db=%s, embedder=%s, model=%s)",
-        args.db, args.embedder, args.embedding_model,
+        "memlife MCP server starting (db=%s, embedder=%s, model=%s, namespace=%s)",
+        resolved_db, args.embedder, args.embedding_model, args.namespace,
     )
 
     # MF-016: ensure store, embedder, and sessions are cleaned up on exit.
