@@ -56,6 +56,9 @@ async def main():
     # Store a fact (durable truth)
     await store.store_fact("User deploys via GitHub Actions", confidence=0.8)
 
+    # Store an entity relationship (fact-like but structured)
+    store.store_triple("User", "deploys_via", "GitHub Actions", confidence=0.8)
+
     # Retrieve relevant memories (unified scoring across all layers)
     context = await store.retrieve("deployment")
     print(context)
@@ -65,7 +68,7 @@ async def main():
 asyncio.run(main())
 ```
 
-No Ollama, no OpenAI, no API key. The DummyEmbedder uses bag-of-words vectors — similar sentences get positive cosine similarity. The full lifecycle — store, retrieve, decay, GC — works without any LLM.
+No Ollama, no OpenAI, no API key. The DummyEmbedder uses bag-of-words vectors — similar sentences get positive cosine similarity. The full lifecycle — store, retrieve, decay, GC, and entity graph — works without any LLM. Only structured extraction and reflection need a model.
 
 ## The Lifecycle
 
@@ -74,32 +77,40 @@ No Ollama, no OpenAI, no API key. The DummyEmbedder uses bag-of-words vectors �
 │  EPISODE  │ ──────────────────▶│  JOURNAL  │
 │  (event)  │   LLM synthesises   │ (belief)  │
 └─────┬─────┘   observations &   └─────┬─────┘
-      │         hypotheses             │
+│  extract triples   │
       │                                 │
-      │ store_fact()                   │ confidence decay
-      ▼                                 │ (30d halflife)
+      │ store_fact() / store_triple()  │ confidence decay
+      ▼                                 │ (configurable)
 ┌───────────┐    recall bumps    ┌─────▼─────┐
 │   FACT    │ ◀────────────────  │  RETIRE   │
 │  (truth)  │   confidence +0.05 │ (floor)   │
 └─────┬─────┘                    └─────┬─────┘
-      │                                │
+│    │
+│    │ entity graph (triples)
+│    ▼
+┌───────────────┐
+│ TRIPLE / GRAPH│
+│(subject-pred- │
+│ object + prov)│
+└───────┬───────┘
+      │
       │ revise / supersede             │ GC prunes
       ▼                                ▼
 ┌───────────┐                   ┌───────────┐
-│ SUPERSEDED│  90 days retention │  PRUNED   │
+│ SUPERSEDED│  configurable     │  PRUNED   │
 │ (replaced)│ ──────────────────▶│ (deleted) │
-└───────────┘                   └───────────┘
+└───────────┘   retention       └───────────┘
 
 UNIFIED SCORE = relevance × confidence × recency
 Applied across ALL layers before every response.
 
-NO-LLM MODE: store + retrieve + decay + GC work
-without any model. Only reflection needs an LLM.
+NO-LLM MODE: store + retrieve + decay + GC + entity graph work
+without any model. Only reflection and structured extraction need an LLM.
 ```
 
 ## No-LLM Mode
 
-The store, retrieval, decay, GC, and embedding versioning all work without any LLM. Only the reflection loop needs a model.
+The store, retrieval, decay, GC, entity graph, and embedding versioning all work without any LLM. Only the reflection loop and structured extraction need a model.
 
 ```python
 from memlife import MemoryStore, MemoryConfig
@@ -217,6 +228,9 @@ Claude Desktop config:
 | `memory_search` | Search facts by query |
 | `memory_search_journal` | Search journal entries |
 | `memory_search_episodes` | Search episodes by keyword or tool name |
+| `memory_store_triple` | Store an entity relationship |
+| `memory_search_triples` | Search triples connected to an entity |
+| `memory_entity_neighbors` | Traverse the entity graph |
 | `memory_revise` | Revise an existing fact |
 | `memory_expire` | Mark a fact as expired |
 | `memory_retrieve` | Unified cross-layer retrieval |
@@ -233,14 +247,18 @@ Claude Desktop config:
 ## Features
 
 - **Four-tier lifecycle:** Episode → Fact → Journal → Decay/Prune
+- **Entity graph:** normalized entities, aliases, and temporal triples with provenance
+- **Graph traversal:** BFS entity neighbors exposed via MCP, no external graph DB
+- **Triple lifecycle:** closed triples and orphan entities/aliases are GC'd like everything else
+- **Confidence decay:** facts decay with a configurable halflife; triples inherit the same decay
 - **Unified scoring:** relevance × confidence × recency across all layers
 - **Confidence ceiling (0.99):** facts are never immutable
-- **Confidence decay:** 30-day halflife, floored at 0.15 — journal entries fade
-- **GC with configurable retention:** 90 days for superseded facts, 180 for episodes, 60 for runs, 30 for metrics
+- **GC with configurable retention:** superseded facts, episodes, runs, metrics, and closed triples
 - **Embedding versioning:** detect stale vectors when the model changes, backfill automatically
 - **Episode tool index:** search "have I used this tool before?"
 - **Incremental contradiction detection:** O(new × n), not O(n²)
 - **Reflection loop:** LLM synthesises observations, hypotheses, and revisions with a critic gate
+- **Structured extraction:** optional MEMORIA extraction turns reflection output into attributable triples
 - **JSONL import/export:** backup and migration
 - **MCP server:** plug into Claude, Cursor, or any MCP client
 - **Adapters:** Ollama, OpenAI, Sentence Transformers
@@ -253,18 +271,19 @@ Claude Desktop config:
 | | memlife | Mem0 | MemPalace | Graphiti |
 |---|---|---|---|---|
 | **Lifecycle/decay** | Yes — core feature | No | No | No |
-| **Confidence erosion** | Yes (30d halflife) | No | No | No |
-| **GC + pruning** | Yes (configurable) | No | No | No |
+| **Confidence erosion** | Yes (configurable halflife) | No | No | No |
+| **GC + pruning** | Yes (configurable, includes triples) | No | No | No |
 | **Reflection loop** | Yes (LLM + critic) | No | No | No |
 | **Embedding versioning** | Yes | No | No | No |
+| **Entity graph / triples** | Yes (SQLite-native) | No | No | Yes |
+| **Graph lifecycle** | Yes (decay + GC) | No | No | No |
 | **Zero-dependency mode** | Yes (DummyEmbedder) | No | No | No |
 | **MCP server** | Yes | No | No | No |
 | **Backend** | SQLite (single file) | Various | SQLite | Neo4j |
-| **Multi-user** | No (single-agent) | Yes | Yes (by wing) | Yes |
-| **Graph reasoning** | No | No | No | Yes |
+| **Multi-user** | Namespaces (isolated DBs) | Yes | Yes (by wing) | Yes |
 | **Self-hosted/local** | Yes | Yes | Yes | Requires Neo4j |
 
-memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pretend to beat everyone at everything — Mem0 has multi-user, Graphiti has graph reasoning. If you want memory that degrades gracefully instead of accumulating forever, memlife is the one.
+memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pretend to beat everyone at everything — Mem0 has multi-user, Graphiti has deep graph analytics. If you want memory that degrades gracefully instead of accumulating forever, memlife is the one.
 
 ## Status
 
