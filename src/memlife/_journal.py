@@ -232,6 +232,8 @@ class JournalStore:
         for reflection, not beliefs to inject into a turn (see
         ``_active_journal_sql`` for the same filter on the keyword paths).
         """
+        if self.config.use_sqlite_vec:
+            return await self._recall_journal_sqlite_vec(query_vector, limit)
         rows = self.conn.execute(
             "SELECT id, type, content, confidence, source_episodes_json, "
             "private, created_at, superseded_by, embedding_json, "
@@ -249,6 +251,43 @@ class JournalStore:
             sim = cosine(query_vector, v)
             # MF-016: use the unified score formula (sim x confidence x recency)
             # matching other recall methods, instead of raw cosine similarity.
+            rec = recency_weight(j.created_at, halflife_days=30.0)
+            score = sim * j.confidence * rec
+            j._relevance = sim  # type: ignore[attr-defined]
+            j._vector_sim = sim  # type: ignore[attr-defined]
+            j._score = score  # type: ignore[attr-defined]
+            scored.append((score, j))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [j for s, j in scored[:limit] if s > 0.0]
+
+    async def _recall_journal_sqlite_vec(
+        self, query_vector: list[float], limit: int,
+    ) -> list[JournalEntry]:
+        """Use sqlite-vec KNN for journal vector recall, then score in Python."""
+        from memlife import vec_backend
+
+        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
+        matches = vec_backend.search(
+            raw, "journal", query_vector, limit=max(limit * 4, 20)
+        )
+        if not matches:
+            return []
+        ids = [item_id for item_id, _sim in matches]
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT id, type, content, confidence, source_episodes_json, "
+            f"private, created_at, superseded_by, embedding_json, "
+            f"last_detected, annotations_json, links_json "
+            f"FROM journal WHERE id IN ({placeholders}) "
+            f"AND superseded_by = '' AND type != 'contradiction'",
+            tuple(ids),
+        ).fetchall()
+        by_id = {r[0]: self._journal_from_row(r) for r in rows}
+        scored = []
+        for item_id, sim in matches:
+            j = by_id.get(item_id)
+            if j is None or j.embedding is None:
+                continue
             rec = recency_weight(j.created_at, halflife_days=30.0)
             score = sim * j.confidence * rec
             j._relevance = sim  # type: ignore[attr-defined]

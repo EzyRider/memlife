@@ -66,6 +66,10 @@ class EmbedMixin:
         if not self.config.use_sqlite_vec or not vec:
             return
         raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
+        # ensure_schema is called inside store(), but it needs a raw connection
+        # with extension loading enabled.  Touch the connection first so the
+        # virtual table is created on the same raw handle the store will use.
+        vec_backend.ensure_schema(raw, len(vec))
         vec_backend.store(raw, kind, item_id, vec)
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]] | None:

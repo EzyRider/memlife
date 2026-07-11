@@ -141,6 +141,8 @@ class FactStore:
             (fact_id, content, source, confidence, embedding_json,
              self.embedding_model_name if new_vec else "", now, now),
         )
+        if new_vec:
+            self._maybe_store_vec("facts", fact_id, new_vec)
         self.conn.commit()
         return fact_id
 
@@ -377,10 +379,14 @@ class FactStore:
     ) -> list[Fact]:
         """Vector recall over facts when embeddings are available, scored by
         cosine × confidence × recency; keyword fallback with same weighting."""
-        facts_with_vec = self._facts_with_embeddings()
         if query_vector is None and self.embedder is not None and query.strip():
             query_vector = (await self.embed_texts([query]) or [None])[0]  # type: ignore[arg-type]
-        if query_vector is not None and facts_with_vec:
+        if query_vector is not None:
+            facts_with_vec = self._facts_with_embeddings()
+            if self.config.use_sqlite_vec:
+                return await self._recall_facts_sqlite_vec(
+                    query_vector, facts_with_vec, limit
+                )
             scored = []
             for f in facts_with_vec:
                 if f.embedding is None:
@@ -421,6 +427,34 @@ class FactStore:
             f._score = f._relevance * f.confidence * recency_weight(f.updated_at)  # type: ignore[attr-defined]
         facts.sort(key=lambda f: getattr(f, "_score", 0), reverse=True)
         return facts[:limit]
+
+    async def _recall_facts_sqlite_vec(
+        self,
+        query_vector: list[float],
+        facts_with_vec: list[Fact],
+        limit: int,
+    ) -> list[Fact]:
+        """Use sqlite-vec KNN for fact vector recall, then score in Python."""
+        from memlife import vec_backend
+
+        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
+        matches = vec_backend.search(
+            raw, "facts", query_vector, limit=max(limit * 4, 20)
+        )
+        if not matches:
+            return []
+        by_id = {f.id: f for f in facts_with_vec if f.embedding is not None}
+        scored = []
+        for item_id, sim in matches:
+            f = by_id.get(item_id)
+            if f is None:
+                continue
+            f._relevance = sim  # type: ignore[attr-defined]
+            f._vector_sim = sim  # type: ignore[attr-defined]
+            f._score = sim * f.confidence * recency_weight(f.updated_at)  # type: ignore[attr-defined]
+            scored.append((f._score, f))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [f for s, f in scored[:limit] if s > 0.0]
 
     def _facts_with_embeddings(self) -> list[Fact]:
         rows = self.conn.execute(

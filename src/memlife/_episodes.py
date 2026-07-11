@@ -169,6 +169,8 @@ class EpisodeStore:
         """Vector recall over episodes that have embeddings, scored by
         cosine × recency_weight."""
         t0 = time.time()
+        if self.config.use_sqlite_vec:
+            return await self._recall_episodes_sqlite_vec(query_vector, limit)
         rows = self.conn.execute(
             "SELECT id, task, outcome, summary, tool_calls_json, created_at, "
             "embedding_json, is_gap_marker FROM episodes WHERE embedding_json != '' "
@@ -219,6 +221,34 @@ class EpisodeStore:
             (since, limit),
         ).fetchall()
         return [Episode.from_row(tuple(r)) for r in rows]
+
+    async def _recall_episodes_sqlite_vec(
+        self, query_vector: list[float], limit: int,
+    ) -> list[Episode]:
+        """Use sqlite-vec KNN for episode vector recall, then score in Python."""
+        from memlife import vec_backend
+
+        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
+        matches = vec_backend.search(
+            raw, "episodes", query_vector, limit=max(limit * 4, 20)
+        )
+        if not matches:
+            return []
+        ids = [item_id for item_id, _sim in matches]
+        eps = self.episodes_by_ids(ids)
+        by_id = {ep.id: ep for ep in eps}
+        scored = []
+        for item_id, sim in matches:
+            ep = by_id.get(item_id)
+            if ep is None or ep.embedding is None:
+                continue
+            rw = recency_weight(ep.created_at)
+            ep._relevance = sim  # type: ignore[attr-defined]
+            ep._vector_sim = sim  # type: ignore[attr-defined]
+            ep._score = sim * rw  # type: ignore[attr-defined]
+            scored.append((ep._score, ep))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [ep for s, ep in scored[:limit] if s > 0.0]
 
     def episodes_sample_historical(
         self, before: float, limit: int = 15, bins: int = 5,
