@@ -113,3 +113,26 @@ def test_sync_memory_store_metrics(tmp_path):
     m = store.metrics()
     assert isinstance(m, Metrics)
     assert m.episodes == 1
+
+
+def test_migration_status_healthy_empty_db(tmp_path):
+    store = MemoryStore(
+        config=MemoryConfig(db_path=str(tmp_path / "migrate.db"))
+    )
+    status = store.migration_status()
+    assert status["healthy"] is True
+    assert status["missing_tables"] == []
+    assert status["missing_columns"] == []
+    assert status["tables_expected"] == status["tables_present"]
+    store.close()
+
+
+def test_migration_status_sync_wrapper(tmp_path):
+    store = SyncMemoryStore(
+        config=MemoryConfig(db_path=str(tmp_path / "sync_migrate.db"))
+    )
+    status = store.migration_status()
+    assert status["healthy"] is True
+    assert status["missing_tables"] == []
+    assert status["missing_columns"] == []
+    store.close()

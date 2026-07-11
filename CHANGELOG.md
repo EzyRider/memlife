@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   embedding coverage, reflection aggregates, recall counters, and DB metadata.
   Exposed on `SyncMemoryStore` and rendered by the `memlife://stats` MCP
   resource.
+- `MemoryStore.migration_status()` reports schema health: expected vs present
+  tables and columns, SQLite version, page stats, and a `healthy` boolean.
+  Exposed on `SyncMemoryStore`.
 - `Metrics` dataclass exported from `memlife`.
 
 ### Changed

@@ -133,6 +133,9 @@ class SyncMemoryStore:
     def metrics(self):
         return self._store.metrics()
 
+    def migration_status(self) -> dict:
+        return self._store.migration_status()
+
     def run_gc(self, **kwargs) -> dict:
         return self._store.run_gc(**kwargs)
 

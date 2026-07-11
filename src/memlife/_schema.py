@@ -191,6 +191,78 @@ class SchemaMixin:
         """)
         self.conn.commit()
 
+    def migration_status(self) -> dict:
+        """Return a snapshot of schema health and pending migrations.
+
+        Checks whether tables/columns expected by the current code exist in
+        the connected database, flags any missing items, and reports the
+        SQLite version and page stats.  This is used by ``store.metrics()``
+        and can be surfaced by operators before upgrading.
+        """
+        import sqlite3
+
+        expected_tables = {
+            "episodes", "agent_runs", "checkpoints", "facts", "journal",
+            "reflection_queue", "sessions", "reflection_metrics",
+            "reflection_passes", "episode_tools", "temporal_triples",
+            "entities", "entity_aliases", "triple_provenance",
+        }
+        expected_columns = {
+            ("episodes", "embedding_json"),
+            ("episodes", "embedding_model"),
+            ("episodes", "is_gap_marker"),
+            ("facts", "embedding_json"),
+            ("facts", "embedding_model"),
+            ("facts", "annotations_json"),
+            ("journal", "embedding_json"),
+            ("journal", "embedding_model"),
+            ("journal", "superseded_by"),
+            ("journal", "last_detected"),
+            ("journal", "annotations_json"),
+            ("journal", "links_json"),
+            ("agent_runs", "trace_json"),
+            ("sessions", "rolling_summary"),
+        }
+
+        existing_tables = {
+            r["name"]
+            for r in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        missing_tables = sorted(expected_tables - existing_tables)
+
+        missing_columns: list[str] = []
+        for table, column in expected_columns:
+            if table not in existing_tables:
+                continue
+            cols = {
+                r["name"]
+                for r in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in cols:
+                missing_columns.append(f"{table}.{column}")
+
+        sqlite_version = sqlite3.sqlite_version
+        page_size = 0
+        page_count = 0
+        try:
+            page_size = self.conn.execute("PRAGMA page_size").fetchone()[0]
+            page_count = self.conn.execute("PRAGMA page_count").fetchone()[0]
+        except Exception:
+            pass
+
+        return {
+            "sqlite_version": sqlite_version,
+            "page_size": page_size,
+            "page_count": page_count,
+            "tables_expected": len(expected_tables),
+            "tables_present": len(existing_tables & expected_tables),
+            "missing_tables": missing_tables,
+            "missing_columns": sorted(missing_columns),
+            "healthy": not missing_tables and not missing_columns,
+        }
+
     def _migrate(self) -> None:
         """Add columns/indexes introduced after the initial schema, for existing DBs.
 
