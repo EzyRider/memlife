@@ -49,8 +49,11 @@ class EpisodeStore:
         # orphaned marker is impossible if the process crashes mid-write.
         threshold_hours = getattr(self.config, "gap_marker_threshold_hours", 0.0)
         if threshold_hours > 0:
+            # Only real episodes can anchor a gap; a synthetic marker must not
+            # trigger another marker (MV2-008).
             last_row = self.conn.execute(
-                "SELECT id, created_at FROM episodes ORDER BY created_at DESC LIMIT 1"
+                "SELECT id, created_at FROM episodes WHERE is_gap_marker = 0 "
+                "ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             if last_row and last_row[0]:
                 last_time = last_row[1]

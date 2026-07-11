@@ -7,8 +7,33 @@ import pytest
 from memlife import MemoryConfig, MemoryStore
 
 
+class FakeClock:
+    """Deterministic clock for gap-marker tests.
+
+    Patches ``time.time`` and ``time.sleep`` so the tests do not depend on
+    real wall-clock timing, which makes them immune to CI runner load.
+    """
+
+    def __init__(self, start: float = 1_000_000.0) -> None:
+        self.now = start
+
+    def time(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 @pytest.fixture
-def gap_store(tmp_path):
+def fake_clock(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(time, "time", clock.time)
+    monkeypatch.setattr(time, "sleep", clock.sleep)
+    return clock
+
+
+@pytest.fixture
+def gap_store(tmp_path, fake_clock):
     db = tmp_path / "gaps.db"
     cfg = MemoryConfig(db_path=str(db), gap_marker_threshold_hours=0.0001)
     store = MemoryStore(cfg)
@@ -17,7 +42,7 @@ def gap_store(tmp_path):
 
 
 @pytest.fixture
-def no_gap_store(tmp_path):
+def no_gap_store(tmp_path, fake_clock):
     db = tmp_path / "no_gaps.db"
     cfg = MemoryConfig(db_path=str(db), gap_marker_threshold_hours=0.0)
     store = MemoryStore(cfg)
