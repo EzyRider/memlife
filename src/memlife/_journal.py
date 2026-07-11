@@ -11,7 +11,7 @@ import logging
 import time
 import uuid
 from memlife.models import JournalEntry
-from memlife.vectors import cosine, recency_weight
+from memlife.vectors import recency_weight
 from memlife.config import MemoryConfig
 
 
@@ -234,21 +234,28 @@ class JournalStore:
         """
         if self.vector_backend.name == "sqlite_vec":
             return await self._recall_journal_sqlite_vec(query_vector, limit)
+        matches = self.vector_backend.search(
+            "journal", query_vector, limit=max(limit * 4, 20)
+        )
+        if not matches:
+            return []
+        ids = [result.item_id for result in matches]
+        placeholders = ",".join("?" * len(ids))
         rows = self.conn.execute(
-            "SELECT id, type, content, confidence, source_episodes_json, "
-            "private, created_at, superseded_by, embedding_json, "
-            "last_detected, annotations_json, links_json "
-            "FROM journal WHERE superseded_by = '' AND embedding_json != '' "
-            "AND type != 'contradiction' "
-            "ORDER BY created_at DESC LIMIT 500"
+            f"SELECT id, type, content, confidence, source_episodes_json, "
+            f"private, created_at, superseded_by, embedding_json, "
+            f"last_detected, annotations_json, links_json "
+            f"FROM journal WHERE id IN ({placeholders}) "
+            f"AND superseded_by = '' AND type != 'contradiction'",
+            tuple(ids),
         ).fetchall()
-        entries = [self._journal_from_row(r) for r in rows]
+        by_id = {r[0]: self._journal_from_row(r) for r in rows}
         scored = []
-        for j in entries:
-            v = j.embedding
-            if v is None:
+        for result in matches:
+            j = by_id.get(result.item_id)
+            if j is None or j.embedding is None:
                 continue
-            sim = cosine(query_vector, v)
+            sim = result.similarity
             # MF-016: use the unified score formula (sim x confidence x recency)
             # matching other recall methods, instead of raw cosine similarity.
             rec = recency_weight(j.created_at, halflife_days=30.0)

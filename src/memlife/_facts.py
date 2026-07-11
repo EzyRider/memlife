@@ -387,11 +387,16 @@ class FactStore:
                 return await self._recall_facts_sqlite_vec(
                     query_vector, facts_with_vec, limit
                 )
+            matches = self.vector_backend.search(
+                "facts", query_vector, limit=max(limit * 4, 20)
+            )
+            by_id = {f.id: f for f in facts_with_vec if f.embedding is not None}
             scored = []
-            for f in facts_with_vec:
-                if f.embedding is None:
+            for result in matches:
+                f = by_id.get(result.item_id)
+                if f is None or f.embedding is None:
                     continue
-                sim = cosine(query_vector, f.embedding)
+                sim = result.similarity
                 f._relevance = sim  # type: ignore[attr-defined]
                 f._vector_sim = sim  # type: ignore[attr-defined]
                 f._score = sim * f.confidence * recency_weight(f.updated_at)  # type: ignore[attr-defined]
@@ -435,20 +440,18 @@ class FactStore:
         limit: int,
     ) -> list[Fact]:
         """Use sqlite-vec KNN for fact vector recall, then score in Python."""
-        from memlife import vec_backend
-
-        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
-        matches = vec_backend.search(
-            raw, "facts", query_vector, limit=max(limit * 4, 20)
+        matches = self.vector_backend.search(
+            "facts", query_vector, limit=max(limit * 4, 20)
         )
         if not matches:
             return []
         by_id = {f.id: f for f in facts_with_vec if f.embedding is not None}
         scored = []
-        for item_id, sim in matches:
-            f = by_id.get(item_id)
+        for result in matches:
+            f = by_id.get(result.item_id)
             if f is None:
                 continue
+            sim = result.similarity
             f._relevance = sim  # type: ignore[attr-defined]
             f._vector_sim = sim  # type: ignore[attr-defined]
             f._score = sim * f.confidence * recency_weight(f.updated_at)  # type: ignore[attr-defined]

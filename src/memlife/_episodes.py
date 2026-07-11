@@ -11,7 +11,7 @@ import re
 import time
 import uuid
 from memlife.models import Episode, JournalEntry
-from memlife.vectors import cosine, recency_weight
+from memlife.vectors import recency_weight
 
 
 logger = logging.getLogger(__name__)
@@ -171,18 +171,20 @@ class EpisodeStore:
         t0 = time.time()
         if self.vector_backend.name == "sqlite_vec":
             return await self._recall_episodes_sqlite_vec(query_vector, limit)
-        rows = self.conn.execute(
-            "SELECT id, task, outcome, summary, tool_calls_json, created_at, "
-            "embedding_json, is_gap_marker FROM episodes WHERE embedding_json != '' "
-            "ORDER BY created_at DESC LIMIT 500"
-        ).fetchall()
-        eps = [Episode.from_row(tuple(r)) for r in rows]
+        matches = self.vector_backend.search(
+            "episodes", query_vector, limit=max(limit * 4, 20)
+        )
+        if not matches:
+            return []
+        ids = [result.item_id for result in matches]
+        eps = self.episodes_by_ids(ids)
+        by_id = {ep.id: ep for ep in eps}
         scored = []
-        for ep in eps:
-            v = ep.embedding
-            if v is None:
+        for result in matches:
+            ep = by_id.get(result.item_id)
+            if ep is None or ep.embedding is None:
                 continue
-            sim = cosine(query_vector, v)
+            sim = result.similarity
             rw = recency_weight(ep.created_at)
             # Attach the normalised relevance so the agent's cross-layer ranker
             # (relevance × confidence × recency) actually includes cosine —
@@ -190,14 +192,14 @@ class EpisodeStore:
             ep._relevance = sim  # type: ignore[attr-defined]
             ep._vector_sim = sim  # type: ignore[attr-defined]
             ep._score = sim * rw  # type: ignore[attr-defined]
-            scored.append((sim * rw, ep))
+            scored.append((ep._score, ep))
         scored.sort(key=lambda t: t[0], reverse=True)
         dt = (time.time() - t0) * 1000
         if dt > 50:
             import logging
             logging.getLogger(__name__).info(
                 "episode vector recall: %.0fms for %d episodes (%d with embeddings)",
-                dt, len(rows), len(scored),
+                dt, len(matches), len(scored),
             )
         return [ep for s, ep in scored[:limit] if s > 0.0]
 

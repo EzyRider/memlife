@@ -109,11 +109,12 @@ class JsonVectorBackend(VectorBackend):
         limit: int = 20,
     ) -> list[VectorSearchResult]:
         """Brute-force cosine search over all stored vectors for ``kind``."""
-        table, _ = self._table_and_filter_for_kind(kind)
+        table, extra_filter = self._table_and_filter_for_kind(kind)
         if not table:
             return []
         rows = self._memory_store.conn.execute(
-            f"SELECT id, embedding_json FROM {table} WHERE embedding_json != ''"
+            f"SELECT id, embedding_json FROM {table} "
+            f"WHERE embedding_json != ''{extra_filter}"
         ).fetchall()
         results: list[VectorSearchResult] = []
         for item_id, raw in rows:

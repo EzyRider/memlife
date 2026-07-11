@@ -124,12 +124,11 @@ class MemoryConfig:
     use_polyphonic_recall: bool = False
     memorias_extraction: bool = False  # structured MEMORIA extraction (I003)
 
-    # Pluggable vector backend (MV2-I001).  "json" is the portable default;
-    # "binary" stores bit-packed vectors for ~32x smaller embeddings;
-    # "sqlite_vec" uses the sqlite-vec extension when available.  The legacy
-    # ``use_sqlite_vec`` flag still selects sqlite_vec for backward
-    # compatibility, but ``vector_backend`` takes precedence when set.
-    vector_backend: str = "json"
+    # Pluggable vector backend (MV2-I001).  ``None`` means "auto": the legacy
+    # ``use_sqlite_vec`` / ``use_binary_vectors`` flags select their respective
+    # backends, otherwise "json" is used.  Explicit values ("json", "binary",
+    # "sqlite_vec", "sqlite-vec") take precedence over the legacy flags.
+    vector_backend: str | None = None
 
     def validate(self) -> None:
         """Fail fast on configuration that would break store init.
@@ -141,18 +140,19 @@ class MemoryConfig:
         # so the user gets the same result whether they typed "Julie" or "julie".
         validate_namespace(self.namespace)
 
-        # Vector backend must be a known value.  The store normalises
-        # "sqlite-vec" to "sqlite_vec" internally.
+        # Vector backend must be a known value (or None for auto).  The store
+        # normalises "sqlite-vec" to "sqlite_vec" internally.
         backend = self.vector_backend
-        if backend is not None:
-            backend = backend.strip().lower()
-            if backend == "sqlite-vec":
-                backend = "sqlite_vec"
-            if backend not in VECTOR_BACKENDS:
-                raise ValueError(
-                    f"unknown vector_backend: {self.vector_backend!r}. "
-                    f"Supported: json, binary, sqlite_vec"
-                )
+        if backend is None:
+            return
+        backend = backend.strip().lower()
+        if backend == "sqlite-vec":
+            backend = "sqlite_vec"
+        if backend not in VECTOR_BACKENDS:
+            raise ValueError(
+                f"unknown vector_backend: {self.vector_backend!r}. "
+                f"Supported: json, binary, sqlite_vec"
+            )
 
         # db_path, when explicit, must not be a directory.
         if self.db_path:
@@ -242,5 +242,5 @@ class MemoryConfig:
             use_binary_vectors=_bool("MEMLIFE_USE_BINARY_VECTORS", False),
             use_polyphonic_recall=_bool("MEMLIFE_USE_POLYPHONIC_RECALL", False),
             memorias_extraction=_bool("MEMLIFE_MEMORIAS_EXTRACTION", False),
-            vector_backend=os.getenv("MEMLIFE_VECTOR_BACKEND", "json"),
+            vector_backend=os.getenv("MEMLIFE_VECTOR_BACKEND", None),
         )

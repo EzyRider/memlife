@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from memlife import (
+    BinaryVectorBackend,
     DummyEmbedder,
     JsonVectorBackend,
     MemoryConfig,
@@ -91,10 +92,12 @@ async def test_json_backend_with_binary_vectors(tmp_path):
     db = tmp_path / "bin.db"
     cfg = MemoryConfig(
         db_path=str(db),
+        vector_backend="json",
         use_binary_vectors=True,
         embedding_model="dummy",
     )
     store = MemoryStore(config=cfg, embedder=DummyEmbedder())
+    # vector_backend='json' is now explicit, so the legacy flag is ignored.
     assert store.vector_backend.name == "json"
 
     ep_id = store.remember("task", "success", summary="hello")
@@ -197,3 +200,172 @@ def test_backend_scoped_to_namespace(tmp_path):
     assert store_a.db_path != store_b.db_path
     store_a.close()
     store_b.close()
+
+
+# -----------------------------------------------------------------------------
+# BinaryVectorBackend tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_binary_backend_search(store):
+    """BinaryVectorBackend uses Hamming distance on packed binary vectors."""
+    backend = BinaryVectorBackend(store)
+    await store.store_fact("cat fact", confidence=0.8, embed=False)
+    await store.store_fact("dog fact", confidence=0.8, embed=False)
+    rows = store.conn.execute(
+        "SELECT id FROM facts WHERE content = ?", ("cat fact",)
+    ).fetchall()
+    cat_id = rows[0][0]
+    rows = store.conn.execute(
+        "SELECT id FROM facts WHERE content = ?", ("dog fact",)
+    ).fetchall()
+    dog_id = rows[0][0]
+
+    cat_vec = [1.0, -1.0, 1.0, -1.0]
+    dog_vec = [-1.0, 1.0, -1.0, 1.0]
+    store.conn.execute(
+        "UPDATE facts SET embedding_json = ? WHERE id = ?",
+        (backend.serialize(cat_vec), cat_id),
+    )
+    store.conn.execute(
+        "UPDATE facts SET embedding_json = ? WHERE id = ?",
+        (backend.serialize(dog_vec), dog_id),
+    )
+    store.conn.commit()
+
+    results = backend.search("facts", cat_vec, limit=2)
+    assert len(results) == 2
+    assert results[0].item_id == cat_id
+    assert results[0].similarity > results[1].similarity
+    assert results[0].kind == "facts"
+
+
+def test_binary_backend_serialize_roundtrip(store):
+    """Binary serialization packs floats and debinarizes them lossily."""
+    backend = BinaryVectorBackend(store)
+    vec = [1.0, -0.5, 0.25, -0.75]
+    raw = backend.serialize(vec)
+    assert raw.startswith("binary:")
+    restored = backend.deserialize(raw)
+    assert restored is not None
+    assert len(restored) == len(vec)
+    # Binarization is lossy: each float becomes ±1.
+    assert restored == pytest.approx([1.0, -1.0, 1.0, -1.0])
+
+
+def test_binary_backend_serialize_empty(store):
+    """Empty vectors serialize to an empty string."""
+    backend = BinaryVectorBackend(store)
+    assert backend.serialize([]) == ""
+    assert backend.deserialize("") is None
+
+
+def test_binary_backend_delete(store):
+    """Deleting a vector clears embedding_json and embedding_model."""
+    backend = BinaryVectorBackend(store)
+    ep_id = store.remember("task", "success", summary="hello")
+    store.conn.execute(
+        "UPDATE episodes SET embedding_json = ?, embedding_model = ? WHERE id = ?",
+        (backend.serialize([1.0, -1.0, 1.0, -1.0]), "model", ep_id),
+    )
+    store.conn.commit()
+    assert backend.delete("episodes", ep_id, dim=4) is True
+    row = store.conn.execute(
+        "SELECT embedding_json, embedding_model FROM episodes WHERE id = ?", (ep_id,)
+    ).fetchone()
+    assert row[0] == ""
+    assert row[1] == ""
+
+
+def test_binary_backend_search_filters_contradictions(store):
+    """Journal search excludes contradiction entries."""
+    backend = BinaryVectorBackend(store)
+    store.conn.execute(
+        "INSERT INTO journal (id, type, content, confidence, source_episodes_json, "
+        "private, created_at, superseded_by, embedding_json) "
+        "VALUES (?, 'observation', ?, 0.8, '[]', 0, ?, '', ?)",
+        ("j_obs", "observation text", 1.0, backend.serialize([1.0, -1.0, 1.0, -1.0])),
+    )
+    store.conn.execute(
+        "INSERT INTO journal (id, type, content, confidence, source_episodes_json, "
+        "private, created_at, superseded_by, embedding_json) "
+        "VALUES (?, 'contradiction', ?, 0.8, '[]', 0, ?, '', ?)",
+        ("j_con", "contradiction text", 1.0, backend.serialize([1.0, -1.0, 1.0, -1.0])),
+    )
+    store.conn.commit()
+    results = backend.search("journal", [1.0, -1.0, 1.0, -1.0], limit=5)
+    assert len(results) == 1
+    assert results[0].item_id == "j_obs"
+
+
+def test_binary_backend_unavailable_for_unknown_kind(store):
+    """Searching an unknown kind returns an empty list safely."""
+    backend = BinaryVectorBackend(store)
+    assert backend.search("unknown", [1.0, -1.0], limit=5) == []
+
+
+@pytest.mark.asyncio
+async def test_binary_backend_recall_facts_end_to_end(tmp_path):
+    """When vector_backend='binary', fact recall uses Hamming distance."""
+    db = tmp_path / "binary_recall.db"
+    cfg = MemoryConfig(
+        db_path=str(db),
+        vector_backend="binary",
+        embedding_model="dummy",
+    )
+    store = MemoryStore(config=cfg, embedder=DummyEmbedder())
+    # Use manually crafted orthogonal binary vectors so the Hamming
+    # distance is deterministic and the query clearly ranks one fact first.
+    cat_id = await store.store_fact("cats are great", confidence=0.9, embed=False)
+    dog_id = await store.store_fact("dogs are great", confidence=0.9, embed=False)
+    backend = store.vector_backend
+    cat_vec = [1.0, -1.0] * 64
+    dog_vec = [-1.0, 1.0] * 64
+    store.conn.execute(
+        "UPDATE facts SET embedding_json = ? WHERE id = ?",
+        (backend.serialize(cat_vec), cat_id),
+    )
+    store.conn.execute(
+        "UPDATE facts SET embedding_json = ? WHERE id = ?",
+        (backend.serialize(dog_vec), dog_id),
+    )
+    store.conn.commit()
+
+    facts = await store.recall_facts("cats", limit=2, query_vector=cat_vec)
+    assert len(facts) == 1
+    assert facts[0].id == cat_id
+    assert getattr(facts[0], "_vector_sim", 0.0) == pytest.approx(1.0)
+    store.close()
+
+
+def test_legacy_use_binary_vectors_selects_binary(tmp_path):
+    """The legacy flag selects the binary backend when vector_backend is default."""
+    db = tmp_path / "legacy_binary.db"
+    cfg = MemoryConfig(
+        db_path=str(db),
+        use_binary_vectors=True,
+        embedding_model="dummy",
+    )
+    store = MemoryStore(config=cfg)
+    assert store.vector_backend.name == "binary"
+    assert isinstance(store.vector_backend, BinaryVectorBackend)
+    store.close()
+
+
+def test_explicit_vector_backend_overrides_legacy_binary(tmp_path):
+    """An explicit vector_backend='json' overrides use_binary_vectors=True."""
+    db = tmp_path / "explicit_json.db"
+    cfg = MemoryConfig(
+        db_path=str(db),
+        vector_backend="json",
+        use_binary_vectors=True,
+        embedding_model="dummy",
+    )
+    store = MemoryStore(config=cfg)
+    assert store.vector_backend.name == "json"
+    assert isinstance(store.vector_backend, JsonVectorBackend)
+    store.close()
+
+
+# Duplicate removed; legacy-binary selection is covered above.
