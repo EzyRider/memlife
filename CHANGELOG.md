@@ -5,7 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.5] - 2026-07-13
+## [0.4.6] - 2026-07-11
+
+### Added
+
+- Pluggable vector backend abstraction (`memlife.vector_backends`) with
+  `VectorBackend` ABC and JSON/sqlite-vec implementations.
+- `MemoryConfig.vector_backend` configuration (env `MEMLIFE_VECTOR_BACKEND`);
+  deprecated `use_sqlite_vec` in favour of explicit backend selection.
+- `MemoryStore` recall and embedding paths now route through the configured
+  vector backend.
+- `tests/test_vector_backends.py` covering backend selection and contract.
+
+### Security
+
+- `validate_namespace()` now normalizes namespaces to lowercase. This prevents
+  `Julie` and `julie` from mapping to different directories on case-sensitive
+  filesystems, matching the behaviour on macOS/Windows and the original roadmap
+  design.
+
+### Fixed
+
+- Renamed `VectorBackend.store` property to `memory_store` to avoid collision
+  with the abstract `store()` method.
+- Removed unused TYPE_CHECKING imports in `_embeddings.py`.
+
+### Added
+
+- Regression tests for namespace case normalization and
+  `switch_namespace()` embedding model preservation.
+
+## [0.4.5] - 2026-07-11
 
 ### Added
 
@@ -81,43 +111,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graph traversal results now include `created_at` so consumers can compute
   decay anchors consistently.
 
-## [0.4.4] - 2026-07-11
-
-### Security
-
-- Validate `MemoryConfig.namespace` against `^[a-zA-Z0-9_-]+$` and reject path
-  separators, `..`, control characters, and empty names. Raises `NamespaceError`.
-  Previously a crafted namespace could escape `data_dir` and access arbitrary
-  files.
-
-### Added
-
-- `memlife.NamespaceError`, `memlife.validate_namespace()`, and
-  `memlife.list_namespaces()`.
-- `MemoryStore.switch_namespace()` returns a new store bound to a different
-  namespace.
-
-## [0.4.5] - 2026-07-11
-
-### Security
-
-- `validate_namespace()` now normalizes namespaces to lowercase. This prevents
-  `Julie` and `julie` from mapping to different directories on case-sensitive
-  filesystems, matching the behaviour on macOS/Windows and the original roadmap
-  design.
-
-### Fixed
-
-- Resolved ruff/linter issues in the new vector backend ABC:
-  - Renamed `VectorBackend.store` property to `memory_store` to avoid collision
-    with the abstract `store()` method.
-  - Removed unused TYPE_CHECKING imports in `_embeddings.py`.
-
-### Added
-
-- Regression tests for namespace case normalization and
-  `switch_namespace()` embedding model preservation.
-
 ## [0.4.2] - 2026-07-11
 
 ### Fixed
@@ -152,4 +145,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Fact.retired` public API property: returns `True` when a fact was expired
   via the `__retired__:` sentinel, `False` when merely superseded.
-

@@ -6,7 +6,23 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.4.4**
+**Current version: 0.4.6**
+
+## What's new in 0.4.6
+
+- **Vector backends are now pluggable.** You can swap between the default JSON
+  backend (works everywhere, no extra dependencies) and a faster `sqlite-vec`
+  backend with a single config change. This makes semantic recall both portable
+  and optionally high-performance.
+- **Namespace support is production-ready.** memlife can now keep different
+  users or agents in completely separate memory stores. Namespace names are
+  validated and normalized so a malicious or accidental name can't escape the
+  data directory.
+- **sqlite-vec integration is cleaner.** The old boolean flag is gone; the
+  sqlite-vec path is now a first-class backend that the store talks to through
+  the same interface as the default backend.
+- **More regression testing.** New tests cover the vector backend contract,
+  namespace case normalization, and namespace switching.
 
 ## What
 
@@ -289,7 +305,7 @@ memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pre
 
 ## Status
 
-**v0.4.5.** The API may change before v1.0. Not recommended for production yet.
+**v0.4.6.** The API may change before v1.0. Not recommended for production yet.
 
 ## License
 
