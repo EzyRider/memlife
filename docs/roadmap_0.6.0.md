@@ -1,8 +1,8 @@
 # memlife 0.6.0 Roadmap
 
-> Clean audit of `main` as of 2026-07-11. Stale backlog items that are already
-> shipped have been removed. Only genuinely pending work, deferred scale items,
-> and packaging/docs gaps remain.
+> Clean audit of `main` and `CHANGELOG.md` as of 2026-07-11.
+> Stale backlog items that are already shipped have been removed.
+> Only genuinely pending work, deferred scale items, and packaging/docs gaps remain.
 >
 > Last updated: 2026-07-11
 
@@ -30,6 +30,13 @@ already shipped and tested:
 - **`Reflector` config "duplication"** — Intentional separation of concerns;
   `Reflector` takes a small set of tuning parameters that may differ from
   `MemoryConfig`. Not a bug.
+- **Namespace isolation** — Separate DB files per namespace, validation,
+  case-normalisation, `list_namespaces()`, `switch_namespace()`. Shipped in
+  0.5.0 (`f319425`, `345b555`, `4a98792`).
+- **Pluggable vector backends** — `VectorBackend` ABC with JSON, binary, and
+  sqlite-vec implementations; `MemoryConfig.vector_backend`; legacy flag
+  migration. Shipped in 0.4.5–0.5.2 (`ba82e5d`, `b55af46`, `0635556`,
+  `0861e7e`, `6eca99c`, `1f02f91`, `00fc3ba`, `b232a15`).
 - **Entity graph substrate** — `entities`, `entity_aliases`, `temporal_triples`,
   `triple_provenance` tables; `store_triple`, `store_fact_triple`,
   `resolve_entity`, `add_entity_alias`, `triples_about`, `triples_from`,
@@ -59,6 +66,13 @@ already shipped and tested:
 - **MCP server cleanup** — `shutdown_mcp_server()` closes store, embedder,
   chat adapter, and reflector; registered with `atexit` and SIGTERM handler.
   Shipped in 0.5.2 (`1f02f91` / `f5c3931` follow-ups).
+- **Reflection audit / correction propagation** — Reflection passes persisted
+  with proposed/kept/dropped items, model metadata, and timing; user
+  corrections stored as superseding journal entries. Shipped in 0.5.0
+  (`345b555`).
+- **Metrics / migration status** — `MemoryStore.metrics()`, public `Metrics`
+  snapshot, `migration_status()`, `memlife://stats`. Shipped in 0.5.0
+  (`9041f1d`, `a76e445`).
 
 ## 2. Genuinely pending work
 
@@ -132,14 +146,14 @@ there is too little graph data to make retrieval changes meaningful.
 
 ### 2.4 Docs / packaging gaps
 
-| Item | File | Status |
-|------|------|--------|
-| Vector backend comparison | `docs/vector-backends.md` | Not created |
-| Namespace design & migration | `docs/namespaces.md` | Not created |
-| Reflection audit & corrections | `docs/reflection-audit.md` | Not created |
-| README MCP tool list accuracy | `README.md` | `memory_recall` is listed but does not exist; `memory_contradictions` is a resource, not a tool |
-| README config snippet accuracy | `README.md` | Uses `reflection_interval`, `decay_half_life_days`, `confidence_floor`, which do not exist in `MemoryConfig` |
-| Package version consistency | `src/memlife/__init__.py` | `__version__` is `"0.5.3"` while `pyproject.toml` and README say `0.5.4` |
+| Item | File | Status | Notes |
+|------|------|--------|-------|
+| Vector backend comparison | `docs/vector-backends.md` | Not created | Compare JSON / binary / sqlite-vec |
+| Namespace design & migration | `docs/namespaces.md` | Not created | Design, migration, backup/restore |
+| Reflection audit & corrections | `docs/reflection-audit.md` | Not created | Transparency and correction usage |
+| README MCP tool list accuracy | `README.md` | Stale | Lists `memory_recall` (removed in `f51306a`) and calls `memory_contradictions` a tool; it is a resource (`memlife://contradictions`) |
+| README config snippet accuracy | `README.md` | Stale | Uses `reflection_interval`, `decay_half_life_days`, `confidence_floor`, which do not exist in `MemoryConfig` |
+| Package version consistency | `src/memlife/__init__.py` | Stale | `__version__` is `"0.5.3"` while `pyproject.toml` and README say `0.5.4` (release commit `3708f92` bumped only `pyproject.toml`) |
 
 ## 3. Operational / scale items (deferred)
 
@@ -167,7 +181,7 @@ are already in `main`. 0.5.5 should therefore be a small docs/packaging patch:
 2. Fix README MCP tool list: remove non-existent `memory_recall`; clarify that
    `memory_contradictions` is a resource.
 3. Fix README `MemoryConfig` example to use real fields (e.g.
-   `fact_decay_halflife_days`, `journal_decay_floor`, `recall_min_score`).
+   `reflection_timeout`, `journal_decay_halflife_days`, `journal_decay_floor`).
 4. Add the missing 0.5.4 CHANGELOG attribution for README/tool-list fixes if
    not already present.
 
@@ -212,6 +226,4 @@ are already in `main`. 0.5.5 should therefore be a small docs/packaging patch:
 
 *Source files audited: `BACKLOG.md`, `docs/ROADMAP.md`, `CHANGELOG.md`,
 `README.md`, `src/memlife/__init__.py`, `src/memlife/config.py`,
-`src/memlife/_embeddings.py`, `src/memlife/_triples.py`,
-`src/memlife/_episodes.py`, `src/memlife/reflection.py`,
 `src/memlife/mcp_server.py`, `src/memlife/_schema.py`.*
