@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from memlife.namespace import validate_namespace
 
+
+logger = logging.getLogger(__name__)
 
 # Vector backends supported by memlife.
 VECTOR_BACKENDS = frozenset({"json", "binary", "sqlite_vec", "sqlite-vec"})
@@ -179,6 +182,39 @@ class MemoryConfig:
             raise ValueError("fact_merge_threshold must be in [0, 1]")
         if not (0 <= self.fact_conflict_threshold <= 1):
             raise ValueError("fact_conflict_threshold must be in [0, 1]")
+
+    def resolved_vector_backend(self) -> str:
+        """Return the effective vector backend name.
+
+        Precedence:
+            1. Explicit ``vector_backend`` (if set and not None).
+            2. Legacy ``use_binary_vectors=True``.
+            3. Legacy ``use_sqlite_vec=True``.
+            4. Default ``json``.
+
+        Both legacy flags may be True at once (e.g. copy-pasted configs). In
+        that case ``use_binary_vectors`` wins because it is the newer, lighter
+        backend and does not require a SQLite extension. A warning is logged so
+        the user knows their config is ambiguous.
+        """
+        if self.vector_backend is not None:
+            backend = self.vector_backend.strip().lower()
+            if backend == "sqlite-vec":
+                backend = "sqlite_vec"
+            return backend
+
+        if self.use_binary_vectors and self.use_sqlite_vec:
+            logger.warning(
+                "both use_binary_vectors and use_sqlite_vec are set; "
+                "using binary (precedence: vector_backend > use_binary_vectors > "
+                "use_sqlite_vec > json default)"
+            )
+
+        if self.use_binary_vectors:
+            return "binary"
+        if self.use_sqlite_vec:
+            return "sqlite_vec"
+        return "json"
 
     @classmethod
     def from_env(cls) -> "MemoryConfig":

@@ -130,21 +130,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         left at its default "json" value.
         """
         cfg = self.config
-        backend_name = cfg.vector_backend
-        if backend_name == "sqlite-vec":
-            backend_name = "sqlite_vec"
-        # Legacy flags only nudge the default "json" backend.  An explicit
-        # vector_backend value takes precedence over the legacy flags.
-        # We detect an explicit override by comparing to the dataclass default.
-        default_backend = type(cfg).__dataclass_fields__["vector_backend"].default
-        is_default = backend_name == default_backend
-        if is_default:
-            if cfg.use_sqlite_vec:
-                backend_name = "sqlite_vec"
-            elif cfg.use_binary_vectors:
-                backend_name = "binary"
-            else:
-                backend_name = "json"
+        backend_name = cfg.resolved_vector_backend()
         backend = create_vector_backend(backend_name, self)
         if backend_name == "sqlite_vec" and not backend.available():
             logger.warning(
