@@ -71,6 +71,8 @@ def create_server(
     base_url: str = "http://localhost:11434",
     chat_model: str = "",  # MF-011: caller must provide
     critic_model: str = "",  # MF-011: caller must provide
+    reflection_timeout: float = 0.0,
+    reflection_total_timeout: float = 0.0,
 ):
     """Create and configure a FastMCP server with memlife tools.
 
@@ -86,6 +88,10 @@ def create_server(
     }
     if vector_backend:
         config_kwargs["vector_backend"] = vector_backend
+    if reflection_timeout:
+        config_kwargs["reflection_timeout"] = reflection_timeout
+    if reflection_total_timeout:
+        config_kwargs["reflection_total_timeout"] = reflection_total_timeout
     config = MemoryConfig(**config_kwargs)
     embedder = _make_embedder(embedder_type, embedding_model, base_url)
     store = MemoryStore(config=config, embedder=embedder)
@@ -549,6 +555,18 @@ def main():
              "If empty, MemoryConfig's default applies.",
     )
     parser.add_argument(
+        "--reflection-timeout",
+        type=float,
+        default=float(os.getenv("MEMLIFE_REFLECTION_TIMEOUT", "0")),
+        help="Per-LLM-call timeout for reflection in seconds (default: use MemoryConfig)",
+    )
+    parser.add_argument(
+        "--reflection-total-timeout",
+        type=float,
+        default=float(os.getenv("MEMLIFE_REFLECTION_TOTAL_TIMEOUT", "0")),
+        help="Total reflection pass timeout in seconds (default: use MemoryConfig)",
+    )
+    parser.add_argument(
         "--log-level", default=os.getenv("MEMLIFE_LOG_LEVEL", "INFO"),
         help="Log level (default: INFO)",
     )
@@ -566,6 +584,8 @@ def main():
         base_url=args.ollama_url,
         chat_model=args.chat_model,
         critic_model=args.critic_model,
+        reflection_timeout=args.reflection_timeout,
+        reflection_total_timeout=args.reflection_total_timeout,
     )
 
     resolved_db = server._memlife_store.db_path  # type: ignore[attr-defined]

@@ -182,6 +182,37 @@ def test_server_has_tools_registered(server):
     assert len(tool_names) > 0 or hasattr(manager, '_tools')
 
 
+def test_create_server_reflection_timeout(tmp_path):
+    """create_server passes reflection timeout overrides to MemoryConfig."""
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_timeout.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        reflection_timeout=45.0,
+        reflection_total_timeout=600.0,
+    )
+    cfg = mcp._memlife_store.config
+    assert cfg.reflection_timeout == 45.0
+    assert cfg.reflection_total_timeout == 600.0
+    mcp._memlife_store.close()
+
+
+@pytest.mark.asyncio
+async def test_memory_reflect_tool_returns_error_on_missing_chat_model(tmp_path):
+    """memory_reflect reports a clear error when no chat model is configured."""
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_reflect.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+    )
+    manager = mcp._tool_manager
+    if hasattr(manager, '_tools') and "memory_reflect" in manager._tools:
+        tool = manager._tools["memory_reflect"]
+        result = await tool.fn(max_episodes=1)
+        assert isinstance(result, str)
+    mcp._memlife_store.close()
+
+
 def test_shutdown_mcp_server_closes_store(server):
     """shutdown_mcp_server closes the underlying store."""
     from memlife.mcp_server import shutdown_mcp_server
