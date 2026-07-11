@@ -23,6 +23,19 @@ def server(tmp_path):
     mcp._memlife_store.close()
 
 
+def test_create_server_vector_backend(tmp_path):
+    """create_server passes the vector_backend option to MemoryConfig."""
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_vec.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        vector_backend="binary",
+    )
+    store = mcp._memlife_store
+    assert store.vector_backend.name == "binary"
+    mcp._memlife_store.close()
+
+
 def _get_tool(server, name):
     """Get a tool function from the FastMCP server."""
     # FastMCP stores tools in _tool_manager

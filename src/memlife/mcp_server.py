@@ -64,6 +64,7 @@ def create_server(
     db_path: str = "",
     data_dir: str = "./memlife_data",
     namespace: str = "_default",
+    vector_backend: str = "",
     embedder_type: str = "dummy",
     embedding_model: str = "dummy",
     base_url: str = "http://localhost:11434",
@@ -76,12 +77,15 @@ def create_server(
     """
     from mcp.server.fastmcp import FastMCP
 
-    config = MemoryConfig(
-        db_path=db_path,
-        data_dir=data_dir,
-        namespace=namespace,
-        embedding_model=embedding_model if embedder_type != "dummy" else "dummy",
-    )
+    config_kwargs = {
+        "db_path": db_path,
+        "data_dir": data_dir,
+        "namespace": namespace,
+        "embedding_model": embedding_model if embedder_type != "dummy" else "dummy",
+    }
+    if vector_backend:
+        config_kwargs["vector_backend"] = vector_backend
+    config = MemoryConfig(**config_kwargs)
     embedder = _make_embedder(embedder_type, embedding_model, base_url)
     store = MemoryStore(config=config, embedder=embedder)
 
@@ -497,6 +501,13 @@ def main():
         help="Ollama model for reflection critic pass (optional)",
     )
     parser.add_argument(
+        "--vector-backend",
+        default=os.getenv("MEMLIFE_VECTOR_BACKEND", ""),
+        choices=["", "json", "sqlite_vec", "binary"],
+        help="Vector backend to use: json (default), sqlite_vec, or binary. "
+             "If empty, MemoryConfig's default applies.",
+    )
+    parser.add_argument(
         "--log-level", default=os.getenv("MEMLIFE_LOG_LEVEL", "INFO"),
         help="Log level (default: INFO)",
     )
@@ -508,6 +519,7 @@ def main():
         db_path=args.db,
         data_dir=args.data_dir,
         namespace=args.namespace,
+        vector_backend=args.vector_backend,
         embedder_type=args.embedder,
         embedding_model=args.embedding_model,
         base_url=args.ollama_url,
@@ -516,9 +528,10 @@ def main():
     )
 
     resolved_db = server._memlife_store.db_path  # type: ignore[attr-defined]
+    backend_name = server._memlife_store.vector_backend.name  # type: ignore[attr-defined]
     logger.info(
-        "memlife MCP server starting (db=%s, embedder=%s, model=%s, namespace=%s)",
-        resolved_db, args.embedder, args.embedding_model, args.namespace,
+        "memlife MCP server starting (db=%s, embedder=%s, model=%s, namespace=%s, vector_backend=%s)",
+        resolved_db, args.embedder, args.embedding_model, args.namespace, backend_name,
     )
 
     # MF-016: ensure store, embedder, and sessions are cleaned up on exit.
