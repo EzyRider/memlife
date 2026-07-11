@@ -42,6 +42,11 @@ def test_vec_backend_store_returns_false_without_extension(tmp_path):
 
     db = tmp_path / "rawvec.db"
     conn = sqlite3.connect(str(db))
+    # If sqlite-vec is installed and this interpreter supports extensions,
+    # the store path uses it; this test specifically checks the no-extension
+    # fallback, which only applies when extension loading is unavailable.
+    if hasattr(conn, "enable_load_extension"):
+        pytest.skip("interpreter supports extension loading; cannot test no-extension fallback")
     result = vec_backend.store(conn, "facts", "f1", [0.1, 0.2, 0.3])
     assert result is False
     conn.close()
@@ -52,6 +57,8 @@ def test_vec_backend_search_returns_empty_without_extension(tmp_path):
 
     db = tmp_path / "rawvec2.db"
     conn = sqlite3.connect(str(db))
+    if hasattr(conn, "enable_load_extension"):
+        pytest.skip("interpreter supports extension loading; cannot test no-extension fallback")
     result = vec_backend.search(conn, "facts", [0.1, 0.2, 0.3], limit=5)
     assert result == []
     conn.close()

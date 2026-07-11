@@ -8,7 +8,6 @@ embeddings.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -20,26 +19,43 @@ logger = logging.getLogger(__name__)
 SQLITE_VEC_AVAILABLE = False
 _sqlite_vec = None
 
-try:
-    import sqlite_vec as _sqlite_vec  # type: ignore[import-untyped]
 
-    SQLITE_VEC_AVAILABLE = True
-except Exception:
-    pass
+def _import_sqlite_vec() -> object | None:
+    global _sqlite_vec, SQLITE_VEC_AVAILABLE
+    if _sqlite_vec is not None:
+        return _sqlite_vec
+    try:
+        import sqlite_vec as sv  # type: ignore[import-untyped]
+
+        _sqlite_vec = sv
+        SQLITE_VEC_AVAILABLE = True
+        return sv
+    except Exception:
+        SQLITE_VEC_AVAILABLE = False
+        return None
 
 
 def available() -> bool:
     """True if the sqlite-vec python package is installed."""
-    return SQLITE_VEC_AVAILABLE
+    return _import_sqlite_vec() is not None
+
+
+def _has_load_extension(conn: sqlite3.Connection) -> bool:
+    """True if this connection/interpreter supports loading extensions."""
+    return hasattr(conn, "enable_load_extension") and hasattr(conn, "load_extension")
 
 
 def can_load(conn: sqlite3.Connection) -> bool:
     """True if sqlite-vec can be loaded into this connection."""
-    if not _sqlite_vec:
+    sv = _import_sqlite_vec()
+    if sv is None:
+        return False
+    if not _has_load_extension(conn):
+        logger.debug("sqlite-vec: interpreter lacks SQLite extension loading support")
         return False
     try:
         conn.enable_load_extension(True)
-        _sqlite_vec.load(conn)
+        sv.load(conn)
         return True
     except Exception as exc:
         logger.debug("sqlite-vec load failed: %s", exc)
@@ -53,7 +69,8 @@ def table_name(dim: int) -> str:
 
 def ensure_schema(conn: sqlite3.Connection, dim: int) -> bool:
     """Create the dimension-specific virtual table and metadata table."""
-    if not _sqlite_vec or not can_load(conn):
+    sv = _import_sqlite_vec()
+    if sv is None or not can_load(conn):
         return False
     vec_table = table_name(dim)
     meta_table = f"{vec_table}_meta"
@@ -83,7 +100,9 @@ def rowid_for(kind: str, item_id: str, dim: int) -> int:
 
     key = f"{kind}:{item_id}:{dim}".encode()
     h = int(hashlib.sha256(key).hexdigest()[:16], 16)
-    return h & 0x7FFFFFFF
+    # Keep rowids within SQLite's signed 64-bit integer range and avoid
+    # negative values, which behave unexpectedly in virtual-table scans.
+    return h & 0x7FFFFFFFFFFFFFFF
 
 
 def store(
@@ -95,6 +114,9 @@ def store(
     """Store a vector in sqlite-vec if possible."""
     if not vec or not ensure_schema(conn, len(vec)):
         return False
+    sv = _import_sqlite_vec()
+    if sv is None:
+        return False
     dim = len(vec)
     vec_table = table_name(dim)
     meta_table = f"{vec_table}_meta"
@@ -102,7 +124,7 @@ def store(
     try:
         conn.execute(
             f"INSERT OR REPLACE INTO {vec_table}(rowid, embedding) VALUES (?, ?)",
-            (rid, json.dumps(vec)),
+            (rid, sv.serialize_float32(vec)),
         )
         conn.execute(
             f"INSERT OR REPLACE INTO {meta_table}(rowid, kind, item_id) "
@@ -112,6 +134,31 @@ def store(
         return True
     except Exception as exc:
         logger.debug("sqlite-vec store failed: %s", exc)
+        return False
+
+
+def delete(
+    conn: sqlite3.Connection,
+    kind: str,
+    item_id: str,
+    dim: int,
+) -> bool:
+    """Remove a vector from sqlite-vec if the virtual table exists."""
+    sv = _import_sqlite_vec()
+    if sv is None or not can_load(conn):
+        return False
+    vec_table = table_name(dim)
+    meta_table = f"{vec_table}_meta"
+    rid = rowid_for(kind, item_id, dim)
+    try:
+        conn.execute(f"DELETE FROM {vec_table} WHERE rowid = ?", (rid,))
+        conn.execute(
+            f"DELETE FROM {meta_table} WHERE rowid = ? AND kind = ?",
+            (rid, kind),
+        )
+        return True
+    except Exception as exc:
+        logger.debug("sqlite-vec delete failed: %s", exc)
         return False
 
 
@@ -125,6 +172,9 @@ def search(
     """Return ``(item_id, similarity)`` tuples via sqlite-vec KNN."""
     if not query_vec or not ensure_schema(conn, len(query_vec)):
         return []
+    sv = _import_sqlite_vec()
+    if sv is None:
+        return []
     dim = len(query_vec)
     vec_table = table_name(dim)
     meta_table = f"{vec_table}_meta"
@@ -136,11 +186,12 @@ def search(
             SELECT v.rowid, v.distance
             FROM {vec_table} AS v
             WHERE v.embedding MATCH ? AND v.k = ?
-              AND v.rowid BETWEEN ? AND ?
+              AND v.rowid IN (
+                  SELECT rowid FROM {meta_table} WHERE kind = ?
+              )
             ORDER BY v.distance
-            LIMIT ?
             """,
-            (json.dumps(query_vec), limit, rid_low, rid_high, limit),
+            (sv.serialize_float32(query_vec), limit, kind),
         ).fetchall()
     except Exception as exc:
         logger.debug("sqlite-vec search failed: %s", exc)
