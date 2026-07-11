@@ -6,23 +6,31 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.4.6**
+**Current version: 0.5.0**
 
-## What's new in 0.4.6
+## What's new in 0.5.0
 
-- **Vector backends are now pluggable.** You can swap between the default JSON
-  backend (works everywhere, no extra dependencies) and a faster `sqlite-vec`
-  backend with a single config change. This makes semantic recall both portable
-  and optionally high-performance.
-- **Namespace support is production-ready.** memlife can now keep different
-  users or agents in completely separate memory stores. Namespace names are
-  validated and normalized so a malicious or accidental name can't escape the
-  data directory.
-- **sqlite-vec integration is cleaner.** The old boolean flag is gone; the
-  sqlite-vec path is now a first-class backend that the store talks to through
-  the same interface as the default backend.
-- **More regression testing.** New tests cover the vector backend contract,
-  namespace case normalization, and namespace switching.
+- **Pluggable vector backends.** Swap between JSON, binary, and `sqlite-vec`
+  backends with a single config change. The new binary backend stores embeddings
+  as bit-packed vectors for ~32x smaller storage, while sqlite-vec provides
+  fast approximate nearest neighbours when the extension is available.
+- **Public `Metrics` snapshot.** `store.metrics()` returns a structured
+  snapshot of counts, embedding coverage, reflection aggregates, recall
+  counters, DB metadata, and schema migration health. Exposed via the
+  `memlife://stats` MCP resource.
+- **Schema migration status.** `store.migration_status()` checks whether the
+  database has all expected tables and columns, flags missing items, and
+  reports SQLite version and page stats. Surfaces in `Metrics` so operators
+  can detect a stale schema before it breaks.
+- **pysqlite3 fallback for sqlite-vec.** On interpreters whose stdlib `sqlite3`
+  is compiled without extension loading, memlife transparently falls back to
+  `pysqlite3` so sqlite-vec can still load.
+- **Reflection audit trail.** Reflection passes are recorded with proposed,
+  kept, and dropped items, plus timing and model metadata. Paginated audit
+  queries help debug what the reflection loop is actually doing.
+- **Namespace default and validation hardening.** The default namespace is now
+  `_default`, names are validated/normalized before any DB is opened, and the
+  config fails fast on unknown vector backends or unsafe paths.
 
 ## What
 
@@ -305,7 +313,7 @@ memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pre
 
 ## Status
 
-**v0.4.6.** The API may change before v1.0. Not recommended for production yet.
+**v0.5.0.** The API may change before v1.0. Not recommended for production yet.
 
 ## License
 

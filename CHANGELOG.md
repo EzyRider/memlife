@@ -7,15 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
 ### Added
 
 - `MemoryStore.metrics()` returns a public `Metrics` snapshot with counts,
-  embedding coverage, reflection aggregates, recall counters, and DB metadata.
-  Exposed on `SyncMemoryStore` and rendered by the `memlife://stats` MCP
-  resource.
+  embedding coverage, reflection aggregates, recall counters, DB metadata,
+  and schema migration health. Exposed on `SyncMemoryStore` and rendered by
+  the `memlife://stats` MCP resource.
 - `MemoryStore.migration_status()` reports schema health: expected vs present
   tables and columns, SQLite version, page stats, and a `healthy` boolean.
-  Exposed on `SyncMemoryStore`.
+  Exposed on `SyncMemoryStore` and included in `Metrics`.
+- `BinaryVectorBackend` — a dedicated pluggable vector backend that stores
+  embeddings as bit-packed binary vectors and searches with Hamming distance.
+  Select with `MemoryConfig(vector_backend="binary")` or
+  `MEMLIFE_VECTOR_BACKEND=binary`.
 - `Metrics` dataclass exported from `memlife`.
 
 ### Changed
@@ -29,10 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vec_backend` module transparently falls back to a `pysqlite3` connection
   when the caller passes a stdlib connection that cannot load extensions.
 - `memlife://stats` resource now uses `store.metrics()` and returns structured
-  counts, embeddings, reflection, and recall sections.
+  counts, embeddings, reflection, recall, and migration sections.
+- Namespace default changed to `_default`; namespace validation and vector
+  backend validation now run before any SQLite file is opened.
+- Reflection passes are persisted with proposed/kept/dropped items, model
+  metadata, and timing for audit/debugging.
 
 ### Fixed
 
+- `recall_facts()` now consults `vector_backend.name` instead of the legacy
+  `config.use_sqlite_vec` flag, so explicit backend selection works correctly.
 - `gap_marker_threshold_hours` query in `_episodes.py` now uses an explicit
   `ORDER BY created_at DESC LIMIT 1` instead of relying on SQLite's bare-column
   aggregate behavior, which is unsupported by some SQLite builds (including
