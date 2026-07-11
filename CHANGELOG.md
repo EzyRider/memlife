@@ -97,6 +97,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MemoryStore.switch_namespace()` returns a new store bound to a different
   namespace.
 
+## [0.4.5] - 2026-07-11
+
+### Security
+
+- `validate_namespace()` now normalizes namespaces to lowercase. This prevents
+  `Julie` and `julie` from mapping to different directories on case-sensitive
+  filesystems, matching the behaviour on macOS/Windows and the original roadmap
+  design.
+
+### Fixed
+
+- Resolved ruff/linter issues in the new vector backend ABC:
+  - Renamed `VectorBackend.store` property to `memory_store` to avoid collision
+    with the abstract `store()` method.
+  - Removed unused TYPE_CHECKING imports in `_embeddings.py`.
+
+### Added
+
+- Regression tests for namespace case normalization and
+  `switch_namespace()` embedding model preservation.
+
 ## [0.4.2] - 2026-07-11
 
 ### Fixed

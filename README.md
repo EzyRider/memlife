@@ -289,7 +289,7 @@ memlife wins on lifecycle, decay, and zero-dependency quickstart. It doesn't pre
 
 ## Status
 
-**v0.4.3.** The API may change before v1.0. Not recommended for production yet.
+**v0.4.5.** The API may change before v1.0. Not recommended for production yet.
 
 ## License
 
