@@ -328,9 +328,10 @@ def create_server(
     def memory_gc() -> str:
         """Run garbage collection on old/superseded memory data. Prunes
         superseded facts (90d), superseded journal (90d), completed runs
-        (60d), metrics (30d), reflected queue entries (30d), and old
-        episodes (180d). Does NOT run VACUUM — use memory_vacuum separately
-        when the store is idle."""
+        (60d), metrics (30d), reflected queue entries (30d), old
+        episodes (180d), and closed temporal triples with their orphaned
+        entities/aliases (90d). Does NOT run VACUUM — use memory_vacuum
+        separately when the store is idle."""
         result = store.run_gc()
         return (
             f"Pruned {result['total_pruned']} rows.\n"
@@ -340,7 +341,11 @@ def create_server(
             f"  checkpoints:        {result.get('checkpoints', 0)}\n"
             f"  reflection metrics: {result.get('reflection_metrics', 0)}\n"
             f"  reflected queue:    {result.get('reflected_queue', 0)}\n"
-            f"  episodes:           {result.get('episodes', 0)}"
+            f"  episodes:           {result.get('episodes', 0)}\n"
+            f"  closed triples:     {result.get('closed_triples', 0)}\n"
+            f"  orphan provenance:  {result.get('orphan_provenance', 0)}\n"
+            f"  orphan aliases:     {result.get('orphan_aliases', 0)}\n"
+            f"  orphan entities:    {result.get('orphan_entities', 0)}"
         )
 
     @mcp.tool()

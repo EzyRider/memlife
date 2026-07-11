@@ -14,6 +14,7 @@ def run_gc(
     metrics_days: int | None = None,
     reflected_queue_days: int | None = None,
     episodes_days: int | None = None,
+    closed_triples_days: int | None = None,
 ) -> dict:
     """Run garbage collection on old/superseded data.
 
@@ -30,4 +31,5 @@ def run_gc(
         metrics_days=metrics_days if metrics_days is not None else cfg.gc_metrics_days,
         reflected_queue_days=reflected_queue_days if reflected_queue_days is not None else cfg.gc_reflected_queue_days,
         episodes_days=episodes_days if episodes_days is not None else cfg.gc_episodes_days,
+        closed_triples_days=closed_triples_days if closed_triples_days is not None else cfg.gc_closed_triples_days,
     )

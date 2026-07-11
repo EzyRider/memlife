@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 import uuid
+
 from memlife._schema import MAX_FACT_CONFIDENCE
 
 
@@ -109,6 +111,32 @@ class TripleMixin:
         self.conn.commit()
         return cur.rowcount
 
+    def effective_triple_confidence(
+        self,
+        triple: dict,
+        halflife_days: float | None = None,
+        floor: float | None = None,
+    ) -> float:
+        """Return the confidence of a triple with age decay applied.
+
+        Uses the same exponential decay formula as ``Fact.effective_confidence``.
+        Open triples (``valid_until`` is None) decay from ``created_at``;
+        closed triples decay from their ``valid_until`` so stale, expired
+        assertions fade rather than contributing to veracity forever.
+
+        Defaults are taken from ``self.config`` so callers can simply pass the
+        raw triple dict.
+        """
+        if halflife_days is None:
+            halflife_days = getattr(self.config, "fact_decay_halflife_days", 365.0)
+        if floor is None:
+            floor = getattr(self.config, "fact_decay_floor", 0.1)
+        raw_conf = min(float(triple.get("confidence", 0.5)), MAX_FACT_CONFIDENCE)
+        anchor = triple.get("valid_until") or triple.get("created_at") or time.time()
+        age_days = max(0.0, (time.time() - anchor) / 86400.0)
+        decay = math.pow(0.5, age_days / max(1e-6, halflife_days))
+        return max(raw_conf * decay, floor)
+
     def current_truth(
         self, subject: str, predicate: str,
     ) -> tuple[str | None, float, str | None]:
@@ -153,7 +181,7 @@ class TripleMixin:
         """Return all triples associated with a fact, enriched with provenance."""
         rows = self.conn.execute(
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
-            "confidence FROM temporal_triples WHERE fact_id = ? "
+            "confidence, created_at FROM temporal_triples WHERE fact_id = ? "
             "ORDER BY valid_from DESC",
             (fact_id,),
         ).fetchall()
@@ -163,6 +191,7 @@ class TripleMixin:
             {
                 "id": r[0], "subject": r[1], "predicate": r[2], "object": r[3],
                 "valid_from": r[4], "valid_until": r[5], "confidence": r[6],
+                "created_at": r[7],
                 "provenance": prov.get(r[0], []),
             }
             for r in rows
@@ -175,7 +204,7 @@ class TripleMixin:
         canonical = self.resolve_entity(entity.strip()) or entity.strip()
         sql = (
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
-            "confidence FROM temporal_triples "
+            "confidence, created_at FROM temporal_triples "
             "WHERE (subject = ? OR object = ?)"
         )
         params: list = [canonical, canonical]
@@ -191,6 +220,7 @@ class TripleMixin:
             {
                 "id": r[0], "subject": r[1], "predicate": r[2], "object": r[3],
                 "valid_from": r[4], "valid_until": r[5], "confidence": r[6],
+                "created_at": r[7],
                 "provenance": prov.get(r[0], []),
             }
             for r in rows
@@ -203,7 +233,7 @@ class TripleMixin:
         canonical = self.resolve_entity(entity.strip()) or entity.strip()
         sql = (
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
-            "confidence FROM temporal_triples WHERE subject = ?"
+            "confidence, created_at FROM temporal_triples WHERE subject = ?"
         )
         params: list = [canonical]
         if predicate:
@@ -218,6 +248,7 @@ class TripleMixin:
             {
                 "id": r[0], "subject": r[1], "predicate": r[2], "object": r[3],
                 "valid_from": r[4], "valid_until": r[5], "confidence": r[6],
+                "created_at": r[7],
                 "provenance": prov.get(r[0], []),
             }
             for r in rows
@@ -230,7 +261,7 @@ class TripleMixin:
         canonical = self.resolve_entity(entity.strip()) or entity.strip()
         sql = (
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
-            "confidence FROM temporal_triples WHERE object = ?"
+            "confidence, created_at FROM temporal_triples WHERE object = ?"
         )
         params: list = [canonical]
         if predicate:
@@ -245,6 +276,7 @@ class TripleMixin:
             {
                 "id": r[0], "subject": r[1], "predicate": r[2], "object": r[3],
                 "valid_from": r[4], "valid_until": r[5], "confidence": r[6],
+                "created_at": r[7],
                 "provenance": prov.get(r[0], []),
             }
             for r in rows

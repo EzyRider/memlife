@@ -70,6 +70,7 @@ class GCMixin:
         metrics_days: int = 30,
         reflected_queue_days: int = 30,
         episodes_days: int = 180,
+        closed_triples_days: int = 90,
     ) -> dict:
         """Run garbage collection on old/superseded data.
 
@@ -83,6 +84,7 @@ class GCMixin:
           - Completed agent runs + their checkpoints: 60 days
           - Reflection metrics: 30 days
           - Reflected queue entries: 30 days
+          - Closed temporal triples: 90 days after valid_until
         """
         now = time.time()
         cutoff_facts = now - (superseded_facts_days * 86400)
@@ -90,6 +92,7 @@ class GCMixin:
         cutoff_runs = now - (completed_runs_days * 86400)
         cutoff_metrics = now - (metrics_days * 86400)
         cutoff_queue = now - (reflected_queue_days * 86400)
+        cutoff_triples = now - (closed_triples_days * 86400)
 
         pruned: dict[str, int] = {}
 
@@ -158,6 +161,36 @@ class GCMixin:
             "(SELECT id FROM episodes)"
         )
         pruned["episode_tools"] = cur_tools.rowcount
+
+        # MV2-003/MV2-010: prune closed temporal triples, orphaned
+        # provenance rows, and entities/aliases with no live triples.
+        cur = self.conn.execute(
+            "DELETE FROM temporal_triples WHERE valid_until IS NOT NULL "
+            "AND valid_until < ?",
+            (cutoff_triples,),
+        )
+        pruned["closed_triples"] = cur.rowcount
+
+        cur = self.conn.execute(
+            "DELETE FROM triple_provenance WHERE triple_id NOT IN "
+            "(SELECT id FROM temporal_triples)"
+        )
+        pruned["orphan_provenance"] = cur.rowcount
+
+        # Drop aliases and entities that no longer participate in any triple.
+        cur = self.conn.execute(
+            "DELETE FROM entity_aliases WHERE canonical_name NOT IN "
+            "(SELECT DISTINCT subject FROM temporal_triples "
+            " UNION SELECT DISTINCT object FROM temporal_triples)"
+        )
+        pruned["orphan_aliases"] = cur.rowcount
+
+        cur = self.conn.execute(
+            "DELETE FROM entities WHERE canonical_name NOT IN "
+            "(SELECT DISTINCT subject FROM temporal_triples "
+            " UNION SELECT DISTINCT object FROM temporal_triples)"
+        )
+        pruned["orphan_entities"] = cur.rowcount
 
         self.conn.commit()
 

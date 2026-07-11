@@ -119,9 +119,9 @@ def _veracity_for_fact(store: MemoryStore, fact: Fact) -> float:
     """Compute veracity signal for a fact.
 
     Combines the fact's own confidence with temporal-triple support.  If the
-    fact expresses one or more currently-true triples, the average confidence
-    of those triples is blended in.  Unsupported facts keep their own
-    confidence only.
+    fact expresses one or more currently-true triples, the average
+    age-decayed confidence of those triples is blended in.  Unsupported
+    facts keep their own confidence only.
     """
     base = fact.confidence
     triples = store.triples_for_fact(fact.id) if hasattr(store, "triples_for_fact") else []
@@ -130,7 +130,9 @@ def _veracity_for_fact(store: MemoryStore, fact: Fact) -> float:
     supported = [t for t in triples if t["valid_until"] is None]
     if not supported:
         return base
-    triple_conf = sum(t["confidence"] for t in supported) / len(supported)
+    triple_conf = sum(
+        store.effective_triple_confidence(t) for t in supported
+    ) / len(supported)
     return 0.6 * base + 0.4 * triple_conf
 
 

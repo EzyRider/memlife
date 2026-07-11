@@ -101,6 +101,7 @@ class MemoryConfig:
     gc_metrics_days: int = 30
     gc_reflected_queue_days: int = 30
     gc_episodes_days: int = 180  # MF-009: episodes were never pruned
+    gc_closed_triples_days: int = 90  # MV2-003: closed temporal triples
 
     # Optional infrastructure backends (MV2-I001..I004).  All default off.
     use_sqlite_vec: bool = False
@@ -165,6 +166,7 @@ class MemoryConfig:
             gc_metrics_days=int(os.getenv("MEMLIFE_GC_METRICS_DAYS", "30")),
             gc_reflected_queue_days=int(os.getenv("MEMLIFE_GC_REFLECTED_QUEUE_DAYS", "30")),
             gc_episodes_days=int(os.getenv("MEMLIFE_GC_EPISODES_DAYS", "180")),
+            gc_closed_triples_days=int(os.getenv("MEMLIFE_GC_CLOSED_TRIPLES_DAYS", "90")),
             use_sqlite_vec=_bool("MEMLIFE_USE_SQLITE_VEC", False),
             use_binary_vectors=_bool("MEMLIFE_USE_BINARY_VECTORS", False),
             use_polyphonic_recall=_bool("MEMLIFE_USE_POLYPHONIC_RECALL", False),

@@ -133,6 +133,9 @@ class SyncMemoryStore:
     def run_gc(self, **kwargs) -> dict:
         return self._store.run_gc(**kwargs)
 
+    def effective_triple_confidence(self, triple: dict, **kwargs) -> float:
+        return self._store.effective_triple_confidence(triple, **kwargs)
+
     def list_sessions(self):
         return self._store.list_sessions()
 
