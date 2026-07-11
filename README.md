@@ -8,6 +8,22 @@ Memory that degrades gracefully. Not another pile that grows forever.
 
 **Current version: 0.5.3**
 
+## What's new in 0.5.3
+
+- **Config validation regression fixed.** `MemoryConfig.validate()` now runs all
+  invariant checks even when `vector_backend` is left at its default auto value.
+  Previously the default of `None` caused validation to return early, skipping
+  decay and threshold checks.
+- **Binary backend no longer loses JSON-stored vectors.** `BinaryVectorBackend`
+  deserialisation now falls back to JSON format for rows stored before the
+  backend was switched, so changing from `json` to `binary` on an existing store
+  does not make old vectors invisible to search.
+- **MCP reflection timeouts are configurable.** `memlife-mcp-server` now accepts
+  `--reflection-timeout` and `--reflection-total-timeout` to keep reflection
+  within the MCP client's window on slower LLM endpoints.
+- **Optional MCP feature flags exposed.** `--memorias-extraction` and
+  `--polyphonic-recall` can now be passed on the MCP server CLI.
+
 ## What's new in 0.5.2
 
 - **Binary vector backend is now used for retrieval.** Previously the backend
