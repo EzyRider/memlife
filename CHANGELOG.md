@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-07-11
+
+### Security
+
+- Validate `MemoryConfig.namespace` against `^[a-zA-Z0-9_-]+$` and reject path
+  separators, `..`, control characters, and empty names. Raises `NamespaceError`.
+  Previously a crafted namespace could escape `data_dir` and access arbitrary
+  files.
+
+### Added
+
+- `memlife.NamespaceError`, `memlife.validate_namespace()`, and
+  `memlife.list_namespaces()`.
+- `MemoryStore.list_namespaces()` class method and `MemoryStore.switch_namespace()`
+  instance method for enumerating and switching between namespace directories.
+
 ## [0.4.3] - 2026-07-11
 
 ### Added

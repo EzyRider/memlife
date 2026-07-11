@@ -37,6 +37,7 @@ from memlife._facts import FactStore
 from memlife._journal import JournalStore
 from memlife.protocols import Embedder
 from memlife.config import MemoryConfig
+from memlife.namespace import validate_namespace, list_namespaces
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +72,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
     @staticmethod
     def _resolve_db_path(config: MemoryConfig) -> str:
         """Resolve namespace layout when db_path is not explicitly set."""
-        namespace = (config.namespace or "default").strip()
-        if not namespace:
-            namespace = "default"
+        namespace = validate_namespace(config.namespace or "default")
         data_dir = Path(config.data_dir or "./memlife_data")
         return str(data_dir / namespace / "memlife.db")
 
@@ -155,6 +154,22 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
     # MF-016: context manager support for clean resource handling.
     def __enter__(self) -> "MemoryStore":
         return self
+
+    @classmethod
+    def list_namespaces(cls, data_dir: str | Path) -> list[str]:
+        """Return the names of existing namespace directories under data_dir."""
+        return list_namespaces(data_dir)
+
+    def switch_namespace(self, new_namespace: str) -> "MemoryStore":
+        """Return a new store instance for a different namespace.
+
+        The new store reuses the current embedder and the same config class,
+        but points at the new namespace's SQLite file.
+        """
+        validate_namespace(new_namespace)
+        new_config = self.config.__class__(**self.config.__dict__)
+        new_config.namespace = new_namespace
+        return self.__class__(config=new_config, embedder=self.embedder)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()

@@ -24,7 +24,7 @@ from memlife.store import MemoryStore
 from memlife.sync_store import SyncMemoryStore
 from memlife.vectors import cosine, recency_weight
 
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 __all__ = [
     "MemoryStore",
@@ -49,6 +49,9 @@ __all__ = [
     "binary_vectors",
     "memorias",
     "polyphonic",
+    "NamespaceError",
+    "validate_namespace",
+    "list_namespaces",
 ]
 
 # Convenience imports
@@ -56,4 +59,5 @@ from memlife.retrieval import retrieve
 from memlife.gc import run_gc
 from memlife.io import export_jsonl, import_jsonl
 from memlife import memorias
+from memlife.namespace import NamespaceError, validate_namespace, list_namespaces
 
