@@ -9,7 +9,7 @@ from memlife.namespace import validate_namespace
 
 
 # Vector backends supported by memlife.
-VECTOR_BACKENDS = frozenset({"json", "sqlite_vec", "sqlite-vec"})
+VECTOR_BACKENDS = frozenset({"json", "binary", "sqlite_vec", "sqlite-vec"})
 
 
 @dataclass
@@ -125,6 +125,7 @@ class MemoryConfig:
     memorias_extraction: bool = False  # structured MEMORIA extraction (I003)
 
     # Pluggable vector backend (MV2-I001).  "json" is the portable default;
+    # "binary" stores bit-packed vectors for ~32x smaller embeddings;
     # "sqlite_vec" uses the sqlite-vec extension when available.  The legacy
     # ``use_sqlite_vec`` flag still selects sqlite_vec for backward
     # compatibility, but ``vector_backend`` takes precedence when set.
@@ -150,7 +151,7 @@ class MemoryConfig:
             if backend not in VECTOR_BACKENDS:
                 raise ValueError(
                     f"unknown vector_backend: {self.vector_backend!r}. "
-                    f"Supported: json, sqlite_vec"
+                    f"Supported: json, binary, sqlite_vec"
                 )
 
         # db_path, when explicit, must not be a directory.

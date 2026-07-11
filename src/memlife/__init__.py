@@ -27,6 +27,7 @@ from memlife.vector_backends import (
     VectorBackend,
     VectorSearchResult,
     JsonVectorBackend,
+    BinaryVectorBackend,
     SqliteVecBackend,
     create_vector_backend,
 )
@@ -63,6 +64,7 @@ __all__ = [
     "VectorBackend",
     "VectorSearchResult",
     "JsonVectorBackend",
+    "BinaryVectorBackend",
     "SqliteVecBackend",
     "create_vector_backend",
 ]

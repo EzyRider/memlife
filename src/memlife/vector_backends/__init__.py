@@ -9,6 +9,7 @@ extension when it is available.
 from __future__ import annotations
 
 from memlife.vector_backends.base import VectorBackend, VectorSearchResult
+from memlife.vector_backends.binary_backend import BinaryVectorBackend
 from memlife.vector_backends.json_backend import JsonVectorBackend
 from memlife.vector_backends.sqlite_vec_backend import SqliteVecBackend
 
@@ -16,6 +17,7 @@ __all__ = [
     "VectorBackend",
     "VectorSearchResult",
     "JsonVectorBackend",
+    "BinaryVectorBackend",
     "SqliteVecBackend",
     "create_vector_backend",
 ]
@@ -27,6 +29,7 @@ def create_vector_backend(name: str, store) -> VectorBackend:
     Args:
         name: Backend identifier. Supported values:
             - "json" (default)
+            - "binary"
             - "sqlite_vec"
         store: The MemoryStore instance that owns this backend.
 
@@ -39,6 +42,8 @@ def create_vector_backend(name: str, store) -> VectorBackend:
     name = (name or "json").lower().strip()
     if name == "json":
         return JsonVectorBackend(store)
+    if name == "binary":
+        return BinaryVectorBackend(store)
     if name in ("sqlite_vec", "sqlite-vec"):
         return SqliteVecBackend(store)
     raise ValueError(f"Unknown vector backend: {name!r}")
