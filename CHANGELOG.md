@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `MemoryStore.metrics()` returns a public `Metrics` snapshot with counts,
+  embedding coverage, reflection aggregates, recall counters, and DB metadata.
+  Exposed on `SyncMemoryStore` and rendered by the `memlife://stats` MCP
+  resource.
+- `Metrics` dataclass exported from `memlife`.
+
+### Changed
+
 - `MemoryStore` now prefers `pysqlite3` over the stdlib `sqlite3` module when
   `pysqlite3` is installed and supports SQLite extension loading. This makes
   the `sqlite_vec` vector backend usable on interpreters whose stdlib SQLite is
@@ -17,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the fallback driver is installed automatically.
 - `vec_backend` module transparently falls back to a `pysqlite3` connection
   when the caller passes a stdlib connection that cannot load extensions.
+- `memlife://stats` resource now uses `store.metrics()` and returns structured
+  counts, embeddings, reflection, and recall sections.
 
 ### Fixed
 

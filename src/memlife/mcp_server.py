@@ -394,18 +394,48 @@ def create_server(
     def stats() -> str:
         """Memory statistics: counts, embedding health, reflection metrics,
         and recall path counters (MV2-006)."""
-        health = store.embedding_health()
-        summary = store.get_metrics_summary()
-        recall = store.recall_stats()
+        metrics = store.metrics()
         return json.dumps({
-            "embedding_model": health.get("embedding_model", ""),
-            "facts": health["facts"],
-            "journal": health["journal"],
-            "episodes": health["episodes"],
-            "reflection_count": summary.get("total_reflections", 0),
-            "unresolved_contradictions": summary.get("unresolved_contradictions", 0),
-            "recall": recall,
-        }, indent=2)
+            "db_path": metrics.db_path,
+            "db_size_mb": metrics.db_size_mb,
+            "namespace": metrics.namespace,
+            "vector_backend": metrics.vector_backend,
+            "embedding_model": metrics.embedding_model,
+            "counts": {
+                "episodes": metrics.episodes,
+                "facts": metrics.facts,
+                "active_facts": metrics.active_facts,
+                "journal_entries": metrics.journal_entries,
+                "active_journal": metrics.active_journal,
+                "contradictions": metrics.contradictions,
+                "unresolved_contradictions": metrics.unresolved_contradictions,
+                "user_corrections": metrics.user_corrections,
+                "sessions": metrics.sessions,
+                "agent_runs": metrics.agent_runs,
+                "triples": metrics.triples,
+                "entities": metrics.entities,
+            },
+            "embeddings": {
+                "embedded_episodes": metrics.embedded_episodes,
+                "embedded_facts": metrics.embedded_facts,
+                "embedded_journal": metrics.embedded_journal,
+                "pending_embeddings": metrics.pending_embeddings,
+                "health": metrics.embedding_health,
+            },
+            "reflection": {
+                "total_reflections": metrics.total_reflections,
+                "last_reflection_at": metrics.last_reflection_at,
+                "avg_keep_rate": metrics.avg_keep_rate,
+                "avg_confidence": metrics.avg_confidence,
+                "total_observations_kept": metrics.total_observations_kept,
+                "total_hypotheses_kept": metrics.total_hypotheses_kept,
+                "total_revisions_kept": metrics.total_revisions_kept,
+                "total_contradictions_found": metrics.total_contradictions_found,
+                "total_retired": metrics.total_retired,
+                "total_merged": metrics.total_merged,
+            },
+            "recall": metrics.recall,
+        }, indent=2, default=str)
 
     @mcp.resource("memlife://health")
     def health_resource() -> str:

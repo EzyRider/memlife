@@ -149,6 +149,57 @@ class Fact:
 
 
 @dataclass
+class Metrics:
+    """Snapshot of memory system health, counts, and diagnostics."""
+
+    # Database / config
+    db_path: str = ""
+    db_size_bytes: int = 0
+    db_size_mb: float = 0.0
+    journal_mode: str = ""
+    busy_timeout_ms: int = 0
+    vector_backend: str = ""
+    namespace: str = ""
+    embedding_model: str = ""
+
+    # Counts
+    episodes: int = 0
+    facts: int = 0
+    active_facts: int = 0
+    journal_entries: int = 0
+    active_journal: int = 0
+    contradictions: int = 0
+    unresolved_contradictions: int = 0
+    user_corrections: int = 0
+    sessions: int = 0
+    agent_runs: int = 0
+    triples: int = 0
+    entities: int = 0
+
+    # Embeddings
+    embedded_episodes: int = 0
+    embedded_facts: int = 0
+    embedded_journal: int = 0
+    pending_embeddings: int = 0
+    embedding_health: dict = field(default_factory=dict)
+
+    # Reflection aggregates
+    total_reflections: int = 0
+    last_reflection_at: float | None = None
+    avg_keep_rate: float | None = None
+    avg_confidence: float | None = None
+    total_observations_kept: int = 0
+    total_hypotheses_kept: int = 0
+    total_revisions_kept: int = 0
+    total_contradictions_found: int = 0
+    total_retired: int = 0
+    total_merged: int = 0
+
+    # Recall diagnostics
+    recall: dict = field(default_factory=dict)
+
+
+@dataclass
 class JournalEntry:
     """A journal entry — observation, hypothesis, revision, or contradiction."""
 

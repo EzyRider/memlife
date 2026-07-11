@@ -130,6 +130,9 @@ class SyncMemoryStore:
     def embedding_health(self) -> dict:
         return self._store.embedding_health()
 
+    def metrics(self):
+        return self._store.metrics()
+
     def run_gc(self, **kwargs) -> dict:
         return self._store.run_gc(**kwargs)
 

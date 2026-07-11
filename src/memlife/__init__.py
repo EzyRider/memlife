@@ -15,7 +15,7 @@ Quickstart:
 """
 
 from memlife.config import MemoryConfig
-from memlife.models import Episode, Fact, JournalEntry
+from memlife.models import Episode, Fact, JournalEntry, Metrics
 from memlife.protocols import ChatCallable, Embedder
 from memlife.embedders import DummyEmbedder
 from memlife.llm import DummyChat
@@ -42,6 +42,7 @@ __all__ = [
     "Episode",
     "Fact",
     "JournalEntry",
+    "Metrics",
     "Embedder",
     "ChatCallable",
     "DummyEmbedder",

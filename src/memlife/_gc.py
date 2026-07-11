@@ -9,6 +9,11 @@ import json
 import logging
 import time
 import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from memlife.models import Metrics
 
 
 logger = logging.getLogger(__name__)
@@ -337,7 +342,8 @@ class GCMixin:
             "SUM(revisions_kept) as total_rev_kept, "
             "SUM(contradictions_found) as total_contradictions, "
             "SUM(consolidated_retired) as total_retired, "
-            "SUM(consolidated_merged) as total_merged "
+            "SUM(consolidated_merged) as total_merged, "
+            "MAX(created_at) as last_reflection_at "
             "FROM reflection_metrics"
         ).fetchone()
         if not row or row[0] == 0:
@@ -349,4 +355,113 @@ class GCMixin:
         contradictions = self.list_contradictions(limit=1000)
         summary["unresolved_contradictions"] = sum(1 for c in contradictions if c["unresolved"])
         return summary
+
+    def metrics(self) -> Metrics:
+        """Return a full snapshot of memory system health and diagnostics."""
+        from memlife.models import Metrics
+
+        # Aggregate counts in one pass. Only count embeddings for tables
+        # that actually store embeddings; other tables just get a total.
+        tables_with_embeddings = {"episodes", "facts", "journal"}
+        counts: dict[str, dict[str, int]] = {}
+        for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall():
+            name = r["name"]
+            if name not in {
+                "episodes", "facts", "journal", "sessions",
+                "agent_runs", "temporal_triples", "entities",
+            }:
+                continue
+            total = self.conn.execute(
+                f"SELECT COUNT(*) FROM {name}"
+            ).fetchone()[0]
+            embedded = 0
+            if name in tables_with_embeddings:
+                embedded = self.conn.execute(
+                    f"SELECT COUNT(*) FROM {name} WHERE embedding_json != ''"
+                ).fetchone()[0]
+            counts[name] = {"total": total, "embedded": embedded}
+
+        active_facts = self.conn.execute(
+            "SELECT COUNT(*) FROM facts WHERE superseded_by = ''"
+        ).fetchone()[0]
+        active_journal = self.conn.execute(
+            "SELECT COUNT(*) FROM journal WHERE superseded_by = ''"
+        ).fetchone()[0]
+        contradictions = self.conn.execute(
+            "SELECT COUNT(*) FROM journal WHERE superseded_by = '' AND type = 'contradiction'"
+        ).fetchone()[0]
+        user_corrections = self.conn.execute(
+            "SELECT COUNT(*) FROM journal WHERE superseded_by = '' AND type = 'user_correction'"
+        ).fetchone()[0]
+
+        health = self.embedding_health()
+        pending = sum(
+            health.get(table, {}).get("missing", 0)
+            for table in ("facts", "journal", "episodes")
+        )
+
+        summary = self.get_metrics_summary()
+        recall = self.recall_stats()
+
+        db_size = 0
+        try:
+            db_size = Path(self.db_path).stat().st_size
+        except OSError:
+            pass
+
+        journal_mode = ""
+        busy_timeout = 0
+        try:
+            journal_mode = self.conn.execute("PRAGMA journal_mode").fetchone()[0]
+            busy_timeout = self.conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        except Exception:
+            pass
+
+        last_reflection = summary.get("last_reflection_at")
+        if last_reflection is not None:
+            try:
+                last_reflection = float(last_reflection)
+            except (TypeError, ValueError):
+                last_reflection = None
+
+        return Metrics(
+            db_path=self.db_path,
+            db_size_bytes=db_size,
+            db_size_mb=round(db_size / 1024 / 1024, 2),
+            journal_mode=str(journal_mode),
+            busy_timeout_ms=int(busy_timeout),
+            vector_backend=self.vector_backend.name,
+            namespace=getattr(self.config, "namespace", ""),
+            embedding_model=self.embedding_model_name,
+            episodes=counts.get("episodes", {}).get("total", 0),
+            facts=counts.get("facts", {}).get("total", 0),
+            active_facts=active_facts,
+            journal_entries=counts.get("journal", {}).get("total", 0),
+            active_journal=active_journal,
+            contradictions=contradictions,
+            unresolved_contradictions=summary.get("unresolved_contradictions", 0),
+            user_corrections=user_corrections,
+            sessions=counts.get("sessions", {}).get("total", 0),
+            agent_runs=counts.get("agent_runs", {}).get("total", 0),
+            triples=counts.get("temporal_triples", {}).get("total", 0),
+            entities=counts.get("entities", {}).get("total", 0),
+            embedded_episodes=counts.get("episodes", {}).get("embedded", 0),
+            embedded_facts=counts.get("facts", {}).get("embedded", 0),
+            embedded_journal=counts.get("journal", {}).get("embedded", 0),
+            pending_embeddings=pending,
+            embedding_health=health,
+            total_reflections=summary.get("total_reflections", 0),
+            last_reflection_at=last_reflection,
+            avg_keep_rate=summary.get("avg_keep_rate"),
+            avg_confidence=summary.get("avg_confidence"),
+            total_observations_kept=summary.get("total_obs_kept", 0),
+            total_hypotheses_kept=summary.get("total_hyp_kept", 0),
+            total_revisions_kept=summary.get("total_rev_kept", 0),
+            total_contradictions_found=summary.get("total_contradictions", 0),
+            total_retired=summary.get("total_retired", 0),
+            total_merged=summary.get("total_merged", 0),
+            recall=recall,
+        )
 
