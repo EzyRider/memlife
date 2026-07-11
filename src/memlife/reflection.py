@@ -243,16 +243,21 @@ class Reflector:
             logger.warning("Reflection model call failed: %s", exc)
             return ReflectionResult(episode_ids=ep_ids, raw=str(exc))
 
-        parsed = self._parse(raw, ep_ids)
+        parsed = self._parse(raw, ep_ids, historical_eps)
         parsed.episode_ids = ep_ids
         parsed.contradictions = self._detect_contradictions()
         self._reflection_cycle += 1
 
-        # Reinforce contradictions that are still unresolved before retiring
-        # stale ones. This keeps long-lived, real tensions active even if the
-        # original fact pair wasn't re-detected in the most recent pass.
+        # Reinforce only contradictions that were re-detected in this pass
+        # before retiring stale ones. This makes contradiction_retirement_cycles
+        # meaningful: retire entries not re-detected for N passes.
+        detected_pairs = {
+            tuple(sorted((c["fact_a"], c["fact_b"])))
+            for c in parsed.contradictions
+            if isinstance(c.get("fact_a"), str) and isinstance(c.get("fact_b"), str)
+        }
         reinforced = self.memory.reinforce_unresolved_contradictions(
-            self._reflection_cycle
+            self._reflection_cycle, detected_pairs=detected_pairs
         )
         retired = self.memory.retire_stale_contradictions(
             self._reflection_cycle, self.contradiction_retirement_cycles
@@ -397,7 +402,9 @@ class Reflector:
             {"role": "user", "content": user},
         ]
 
-    def _parse(self, raw: str, ep_ids: list[str]) -> ReflectionResult:
+    def _parse(
+        self, raw: str, ep_ids: list[str], historical_episodes: list | None = None
+    ) -> ReflectionResult:
         result = ReflectionResult(raw=raw)
         data = self._extract_json(raw)
         if data is None:
@@ -405,6 +412,8 @@ class Reflector:
             return result
 
         valid_ep = set(ep_ids)
+        if historical_episodes:
+            valid_ep.update(e.id for e in historical_episodes if getattr(e, "id", None))
         for key in ("observations", "hypotheses", "revisions"):
             entries = data.get(key, [])
             if not isinstance(entries, list):

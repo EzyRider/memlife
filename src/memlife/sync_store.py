@@ -50,20 +50,17 @@ class SyncMemoryStore:
     def _run(self, coro: Any) -> Any:
         """Run a coroutine, creating a new event loop if needed."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # We're already in an async context — can't use asyncio.run().
-                raise RuntimeError(
-                    "SyncMemoryStore cannot be used from within a running "
-                    "event loop. Use MemoryStore directly instead."
-                )
+            loop = asyncio.get_running_loop()
+            # We're already in an async context — can't use asyncio.run().
+            raise RuntimeError(
+                "SyncMemoryStore cannot be used from within a running "
+                "event loop. Use MemoryStore directly instead."
+            )
         except RuntimeError as exc:
-            # Distinguish "no event loop" (expected — proceed to asyncio.run)
-            # from "loop is running" (re-raise — we can't run a coro here).
+            # "no running event loop" (expected) — fall through to asyncio.run().
+            # Any other RuntimeError (e.g. our own message above) is re-raised.
             if "cannot be used from within a running" in str(exc):
                 raise
-            # "There is no current event loop" — expected, fall through.
-            pass
         return asyncio.run(coro)
 
     # --- Passthrough properties ---

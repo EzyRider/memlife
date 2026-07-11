@@ -134,6 +134,11 @@ class Fact:
         except (json.JSONDecodeError, TypeError):
             return []
 
+    @property
+    def retired(self) -> bool:
+        """True if this fact was explicitly expired rather than superseded."""
+        return self.superseded_by.startswith("__retired__")
+
     def effective_confidence(
         self, halflife_days: float = 365.0, floor: float = 0.1
     ) -> float:

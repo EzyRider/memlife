@@ -416,13 +416,19 @@ class JournalStore:
         self.conn.commit()
         return cur.rowcount
 
-    def reinforce_unresolved_contradictions(self, current_cycle: int) -> int:
-        """Update last_detected for contradictions that are still unresolved.
+    def reinforce_unresolved_contradictions(
+        self, current_cycle: int, detected_pairs: set[tuple[str, str]] | None = None,
+    ) -> int:
+        """Update last_detected for unresolved contradictions that were re-detected
+        in the current reflection pass.
 
-        A contradiction is unresolved if both source facts still resolve to
-        active, distinct facts. These tensions stay alive across reflection
-        passes and should not be retired just because they were first created
-        a while ago. Returns the number of contradictions reinforced.
+        If ``detected_pairs`` is provided, only contradictions covering one of
+        those fact pairs (in either order) are reinforced. This makes the
+        ``contradiction_retirement_cycles`` knob meaningful: a contradiction is
+        retired only when it has not been re-detected for that many passes,
+        not merely because its facts remain active.
+
+        Returns the number of contradictions reinforced.
         """
         rows = self.conn.execute(
             "SELECT id, source_episodes_json FROM journal "
@@ -440,6 +446,9 @@ class JournalStore:
             a = self.resolve_fact(fact_ids[0])
             b = self.resolve_fact(fact_ids[1])
             if a is None or b is None or a.id == b.id:
+                continue
+            pair = tuple(sorted((a.id, b.id)))
+            if detected_pairs is not None and pair not in detected_pairs:
                 continue
             self.conn.execute(
                 "UPDATE journal SET last_detected = ? WHERE id = ?",

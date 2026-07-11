@@ -49,6 +49,9 @@ class EpisodeStore:
         # orphaned marker is impossible if the process crashes mid-write.
         threshold_hours = getattr(self.config, "gap_marker_threshold_hours", 0.0)
         if threshold_hours > 0:
+            # SQLite lets a bare column ride along with a lone MAX/MIN aggregate
+            # and returns the row that produced the extreme value. We rely on
+            # this to get the timestamp of the most recent episode in one query.
             last_row = self.conn.execute(
                 "SELECT id, MAX(created_at) FROM episodes"
             ).fetchone()
