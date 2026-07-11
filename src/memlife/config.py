@@ -109,6 +109,12 @@ class MemoryConfig:
     use_polyphonic_recall: bool = False
     memorias_extraction: bool = False  # structured MEMORIA extraction (I003)
 
+    # Pluggable vector backend (MV2-I001).  "json" is the portable default;
+    # "sqlite_vec" uses the sqlite-vec extension when available.  The legacy
+    # ``use_sqlite_vec`` flag still selects sqlite_vec for backward
+    # compatibility, but ``vector_backend`` takes precedence when set.
+    vector_backend: str = "json"
+
     @classmethod
     def from_env(cls) -> "MemoryConfig":
         """Load from environment variables with MEMLIFE_ prefix."""
@@ -171,4 +177,5 @@ class MemoryConfig:
             use_binary_vectors=_bool("MEMLIFE_USE_BINARY_VECTORS", False),
             use_polyphonic_recall=_bool("MEMLIFE_USE_POLYPHONIC_RECALL", False),
             memorias_extraction=_bool("MEMLIFE_MEMORIAS_EXTRACTION", False),
+            vector_backend=os.getenv("MEMLIFE_VECTOR_BACKEND", "json"),
         )

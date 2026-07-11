@@ -232,7 +232,7 @@ class JournalStore:
         for reflection, not beliefs to inject into a turn (see
         ``_active_journal_sql`` for the same filter on the keyword paths).
         """
-        if self.config.use_sqlite_vec:
+        if self.vector_backend.name == "sqlite_vec":
             return await self._recall_journal_sqlite_vec(query_vector, limit)
         rows = self.conn.execute(
             "SELECT id, type, content, confidence, source_episodes_json, "
@@ -264,15 +264,12 @@ class JournalStore:
         self, query_vector: list[float], limit: int,
     ) -> list[JournalEntry]:
         """Use sqlite-vec KNN for journal vector recall, then score in Python."""
-        from memlife import vec_backend
-
-        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
-        matches = vec_backend.search(
-            raw, "journal", query_vector, limit=max(limit * 4, 20)
+        matches = self.vector_backend.search(
+            "journal", query_vector, limit=max(limit * 4, 20)
         )
         if not matches:
             return []
-        ids = [item_id for item_id, _sim in matches]
+        ids = [result.item_id for result in matches]
         placeholders = ",".join("?" * len(ids))
         rows = self.conn.execute(
             f"SELECT id, type, content, confidence, source_episodes_json, "
@@ -284,14 +281,14 @@ class JournalStore:
         ).fetchall()
         by_id = {r[0]: self._journal_from_row(r) for r in rows}
         scored = []
-        for item_id, sim in matches:
-            j = by_id.get(item_id)
+        for result in matches:
+            j = by_id.get(result.item_id)
             if j is None or j.embedding is None:
                 continue
             rec = recency_weight(j.created_at, halflife_days=30.0)
-            score = sim * j.confidence * rec
-            j._relevance = sim  # type: ignore[attr-defined]
-            j._vector_sim = sim  # type: ignore[attr-defined]
+            score = result.similarity * j.confidence * rec
+            j._relevance = result.similarity  # type: ignore[attr-defined]
+            j._vector_sim = result.similarity  # type: ignore[attr-defined]
             j._score = score  # type: ignore[attr-defined]
             scored.append((score, j))
         scored.sort(key=lambda t: t[0], reverse=True)

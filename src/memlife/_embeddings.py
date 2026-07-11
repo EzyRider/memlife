@@ -5,12 +5,8 @@ Extracted from store.py as part of the mixin refactor.
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
 from typing import TYPE_CHECKING
-from memlife import binary_vectors, vec_backend
-
 
 if TYPE_CHECKING:
     pass
@@ -29,48 +25,21 @@ class EmbedMixin:
     embedder: object
     embedding_model_name: str
     _embed_failures: int
+    vector_backend: "memlife.vector_backends.base.VectorBackend"
 
     def _serialize_vec(self, vec: list[float]) -> str:
-        """Serialize a float vector for storage.
-
-        When ``config.use_binary_vectors`` is True the vector is binarized
-        and base64-encoded as ``binary:<dim>:<bytes>``; otherwise it is
-        stored as JSON floats.
-        """
-        if not vec:
-            return ""
-        if self.config.use_binary_vectors:
-            packed = binary_vectors.binarize(vec)
-            return f"binary:{len(vec)}:{base64.b64encode(packed).decode()}"
-        return json.dumps(vec)
+        """Serialize a float vector for storage."""
+        return self.vector_backend.serialize(vec)
 
     def _deserialize_vec(self, raw: str) -> list[float] | None:
         """Reconstruct a float vector from its stored form."""
-        if not raw:
-            return None
-        if raw.startswith("binary:"):
-            try:
-                _, dim_str, b64 = raw.split(":", 2)
-                dim = int(dim_str)
-                packed = base64.b64decode(b64)
-                return binary_vectors.debinarize(packed, dim)
-            except Exception:
-                return None
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            return None
+        return self.vector_backend.deserialize(raw)
 
     def _maybe_store_vec(self, kind: str, item_id: str, vec: list[float]) -> None:
-        """Try to persist the vector in sqlite-vec; ignore failures silently."""
-        if not self.config.use_sqlite_vec or not vec:
+        """Persist the vector through the configured backend."""
+        if not vec:
             return
-        raw = self.conn._raw if hasattr(self.conn, "_raw") else self.conn
-        # ensure_schema is called inside store(), but it needs a raw connection
-        # with extension loading enabled.  Touch the connection first so the
-        # virtual table is created on the same raw handle the store will use.
-        vec_backend.ensure_schema(raw, len(vec))
-        vec_backend.store(raw, kind, item_id, vec)
+        self.vector_backend.store(kind, item_id, vec)
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]] | None:
         """Best-effort embedding; returns None if no embedder or it fails.
@@ -137,7 +106,7 @@ class EmbedMixin:
             return {"total": total, "with_embeddings": with_vec,
                     "missing": total - with_vec, "stale": stale}
 
-        return {
+        health = {
             "facts": _count("facts"),
             "journal": _count("journal"),
             "episodes": _count("episodes"),
@@ -145,6 +114,8 @@ class EmbedMixin:
             "consecutive_failures": self._embed_failures,
             "embedder_present": self.embedder is not None,
         }
+        health.update(self.vector_backend.health())
+        return health
 
     async def backfill_embeddings(self, batch_size: int = 20) -> dict:
         """Re-embed facts, journal entries, and episodes that are missing vectors
@@ -193,33 +164,15 @@ class EmbedMixin:
             self.conn.commit()
 
         # Journal entries without embeddings (skip contradictions — they're
-        # not retrieved, so embedding them is wasted work) or with stale model.
-        # MF-005: contradictions with existing but stale embeddings ARE
-        # backfilled so they don't become orphaned vectors after a model swap.
-        # Only contradictions with NO embedding are skipped.
-        if self.embedding_model_name:
-            j_rows = self.conn.execute(
-                f"SELECT id, content FROM journal "
-                f"WHERE (embedding_json = ''{model_clause}) "
-                f"AND content != '' AND type != 'contradiction'",
-                model_params,
-            ).fetchall()
-            # Contradictions: only backfill stale-model ones, not missing.
-            j_contradiction_rows = self.conn.execute(
-                "SELECT id, content FROM journal "
-                "WHERE embedding_json != '' AND embedding_model != ? "
-                "AND content != '' AND type = 'contradiction'",
-                [self.embedding_model_name],
-            ).fetchall()
-            j_rows = j_rows + j_contradiction_rows
-        else:
-            j_rows = self.conn.execute(
-                "SELECT id, content FROM journal "
-                "WHERE embedding_json = '' "
-                "AND content != '' AND type != 'contradiction'",
-            ).fetchall()
-        for i in range(0, len(j_rows), batch_size):
-            batch = j_rows[i:i + batch_size]
+        # not retrieved into context).
+        journal_rows = self.conn.execute(
+            f"SELECT id, content FROM journal "
+            f"WHERE type != 'contradiction' "
+            f"AND (embedding_json = ''{model_clause}) AND content != ''",
+            model_params,
+        ).fetchall()
+        for i in range(0, len(journal_rows), batch_size):
+            batch = journal_rows[i:i + batch_size]
             texts = [r[1] for r in batch]
             vecs = await self.embed_texts(texts)
             if vecs is None:
@@ -240,18 +193,19 @@ class EmbedMixin:
         # Episodes without embeddings or with stale model.
         ep_rows = self.conn.execute(
             f"SELECT id, task, summary FROM episodes "
-            f"WHERE (embedding_json = ''{model_clause}) AND task != ''",
+            f"WHERE is_gap_marker = 0 "
+            f"AND (embedding_json = ''{model_clause}) "
+            f"AND (task != '' OR summary != '')",
             model_params,
         ).fetchall()
-        ep_texts = [f"{r[1]}\n{r[2] or ''}".strip() for r in ep_rows]
         for i in range(0, len(ep_rows), batch_size):
-            batch_texts = ep_texts[i:i + batch_size]
-            batch_rows = ep_rows[i:i + batch_size]
-            vecs = await self.embed_texts(batch_texts)
+            batch = ep_rows[i:i + batch_size]
+            texts = [f"{r[1]}\n{r[2] or ''}".strip() for r in batch]
+            vecs = await self.embed_texts(texts)
             if vecs is None:
-                results["failed"] += len(batch_rows)
+                results["failed"] += len(batch)
                 continue
-            for row, vec in zip(batch_rows, vecs):
+            for row, vec in zip(batch, vecs):
                 if vec:
                     self.conn.execute(
                         "UPDATE episodes SET embedding_json = ?, embedding_model = ? WHERE id = ?",
@@ -264,4 +218,3 @@ class EmbedMixin:
             self.conn.commit()
 
         return results
-

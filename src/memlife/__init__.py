@@ -23,6 +23,13 @@ from memlife.reflection import Reflector, ReflectionResult
 from memlife.store import MemoryStore
 from memlife.sync_store import SyncMemoryStore
 from memlife.vectors import cosine, recency_weight
+from memlife.vector_backends import (
+    VectorBackend,
+    VectorSearchResult,
+    JsonVectorBackend,
+    SqliteVecBackend,
+    create_vector_backend,
+)
 
 __version__ = "0.4.4"
 
@@ -52,6 +59,11 @@ __all__ = [
     "NamespaceError",
     "validate_namespace",
     "list_namespaces",
+    "VectorBackend",
+    "VectorSearchResult",
+    "JsonVectorBackend",
+    "SqliteVecBackend",
+    "create_vector_backend",
 ]
 
 # Convenience imports

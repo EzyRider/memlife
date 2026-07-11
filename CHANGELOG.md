@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-07-13
+
+### Added
+
+- Pluggable vector backend abstraction (`memlife.vector_backends`).
+- `VectorBackend` base class with JSON and `sqlite-vec` implementations.
+- `MemoryConfig.vector_backend` option (env var `MEMLIFE_VECTOR_BACKEND`) to
+  select `json` (default, no extra dependencies) or `sqlite_vec`.
+- `MemoryConfig.use_sqlite_vec` is now deprecated and maps to
+  `vector_backend == "sqlite_vec"`.
+
+### Changed
+
+- `FactStore`, `EpisodeStore`, and `JournalStore` now delegate vector storage
+  to the configured backend instead of calling `vec_backend` module functions
+  directly.
+- `EmbeddingMixin` uses the backend for vector serialization, search, and
+  distance scoring, making binary-vector and sqlite-vec paths consistent.
+
+### Fixed
+
+- `_supersede_fact` savepoint/transaction interaction cleaned up; no longer
+  releases the savepoint before the update completes.
+
 ## [0.4.4] - 2026-07-11
 
 ### Security

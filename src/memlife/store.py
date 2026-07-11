@@ -38,6 +38,7 @@ from memlife._journal import JournalStore
 from memlife.protocols import Embedder
 from memlife.config import MemoryConfig
 from memlife.namespace import validate_namespace, list_namespaces
+from memlife.vector_backends import create_vector_backend
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         self.embedder = embedder
         self.config = config
         self._init_store_attrs(config)
+        self._init_vector_backend()
 
     @staticmethod
     def _resolve_db_path(config: MemoryConfig) -> str:
@@ -112,6 +114,27 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
             "voice_hits_veracity": 0,
             "voice_hits_recency": 0,
         }
+
+    def _init_vector_backend(self) -> None:
+        """Create the vector backend instance for this store.
+
+        The backend is scoped to this store/namespace/connection.  Legacy
+        ``use_sqlite_vec=True`` selects sqlite_vec when ``vector_backend`` is
+        left at its default "json" value.
+        """
+        backend_name = self.config.vector_backend
+        if backend_name == "sqlite-vec":
+            backend_name = "sqlite_vec"
+        if backend_name == "json" and self.config.use_sqlite_vec:
+            backend_name = "sqlite_vec"
+        backend = create_vector_backend(backend_name, self)
+        if backend_name == "sqlite_vec" and not backend.available():
+            logger.warning(
+                "sqlite-vec requested but not available (extension missing or "
+                "loading unsupported); falling back to json vector backend"
+            )
+            backend = create_vector_backend("json", self)
+        self.vector_backend = backend
 
     @property
     def conn(self) -> _LockedConn:
