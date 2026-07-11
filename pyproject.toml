@@ -26,7 +26,10 @@ classifiers = [
 ollama = ["aiohttp"]
 openai = ["openai"]
 sentence-transformers = ["sentence-transformers"]
-sqlite-vec = ["sqlite-vec"]
+sqlite-vec = [
+    "sqlite-vec",
+    "pysqlite3-binary ; platform_system=='Linux'",
+]
 mcp = ["mcp"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
 

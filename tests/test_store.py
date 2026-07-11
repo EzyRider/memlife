@@ -246,3 +246,34 @@ async def test_reinforce_contradictions_only_when_detected(store):
         "SELECT last_detected FROM journal WHERE id = ?", (jid,)
     ).fetchone()
     assert row[0] == 4
+
+
+def test_store_prefers_pysqlite3_when_extensions_supported(tmp_path):
+    """MemoryStore uses pysqlite3 if it supports extension loading."""
+    from memlife import MemoryConfig
+
+    db = tmp_path / "pysqlite3.db"
+    store = MemoryStore(
+        config=MemoryConfig(db_path=str(db), vector_backend="sqlite_vec"),
+        embedder=DummyEmbedder(),
+    )
+    try:
+        # The underlying raw connection should be pysqlite3 when available.
+        raw = store.conn._raw
+        module_name = type(raw).__module__
+        has_ext = hasattr(raw, "enable_load_extension") and hasattr(raw, "load_extension")
+        if _pysqlite3_available():
+            assert "pysqlite3" in module_name
+            assert has_ext
+        else:
+            assert module_name == "sqlite3"
+    finally:
+        store.close()
+
+
+def _pysqlite3_available() -> bool:
+    try:
+        import pysqlite3.dbapi2  # noqa: F401
+        return True
+    except Exception:
+        return False

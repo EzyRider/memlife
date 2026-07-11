@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `MemoryStore` now prefers `pysqlite3` over the stdlib `sqlite3` module when
+  `pysqlite3` is installed and supports SQLite extension loading. This makes
+  the `sqlite_vec` vector backend usable on interpreters whose stdlib SQLite is
+  compiled without `ENABLE_LOAD_EXTENSION` (e.g. manylinux wheels).
+- `sqlite-vec` optional dependency now includes `pysqlite3-binary` on Linux so
+  the fallback driver is installed automatically.
+- `vec_backend` module transparently falls back to a `pysqlite3` connection
+  when the caller passes a stdlib connection that cannot load extensions.
+
+### Fixed
+
+- `gap_marker_threshold_hours` query in `_episodes.py` now uses an explicit
+  `ORDER BY created_at DESC LIMIT 1` instead of relying on SQLite's bare-column
+  aggregate behavior, which is unsupported by some SQLite builds (including
+  pysqlite3).
+
 ## [0.4.6] - 2026-07-11
 
 ### Added

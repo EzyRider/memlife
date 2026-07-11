@@ -37,7 +37,7 @@ async def test_store_falls_back_to_json_when_sqlite_vec_unavailable(tmp_path):
 
 
 def test_vec_backend_store_returns_false_without_extension(tmp_path):
-    """The adapter returns False when sqlite-vec cannot be loaded."""
+    """The adapter returns False when sqlite-vec cannot be loaded and no pysqlite3 fallback exists."""
     import sqlite3
 
     db = tmp_path / "rawvec.db"
@@ -47,6 +47,13 @@ def test_vec_backend_store_returns_false_without_extension(tmp_path):
     # fallback, which only applies when extension loading is unavailable.
     if hasattr(conn, "enable_load_extension"):
         pytest.skip("interpreter supports extension loading; cannot test no-extension fallback")
+    # If pysqlite3 is available, the vec_backend will transparently use it,
+    # so this test cannot assert failure.
+    try:
+        import pysqlite3.dbapi2  # noqa: F401
+        pytest.skip("pysqlite3 fallback is available; cannot test no-extension fallback")
+    except Exception:
+        pass
     result = vec_backend.store(conn, "facts", "f1", [0.1, 0.2, 0.3])
     assert result is False
     conn.close()
@@ -59,6 +66,11 @@ def test_vec_backend_search_returns_empty_without_extension(tmp_path):
     conn = sqlite3.connect(str(db))
     if hasattr(conn, "enable_load_extension"):
         pytest.skip("interpreter supports extension loading; cannot test no-extension fallback")
+    try:
+        import pysqlite3.dbapi2  # noqa: F401
+        pytest.skip("pysqlite3 fallback is available; cannot test no-extension fallback")
+    except Exception:
+        pass
     result = vec_backend.search(conn, "facts", [0.1, 0.2, 0.3], limit=5)
     assert result == []
     conn.close()

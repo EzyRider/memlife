@@ -21,10 +21,16 @@ SQLite file and zero extra services.
 from __future__ import annotations
 
 import logging
-import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+
+import sqlite3
+
+try:
+    import pysqlite3.dbapi2 as _pysqlite3  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - not installed on all interpreters
+    _pysqlite3 = None  # type: ignore[misc]
 
 from memlife._locked_conn import _LockedConn
 from memlife._schema import SchemaMixin
@@ -142,8 +148,8 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         if self._conn is None:
             with self._lock:
                 if self._conn is None:
-                    raw = sqlite3.connect(self.db_path, check_same_thread=False)
-                    raw.row_factory = sqlite3.Row
+                    raw, sqlite_mod = self._connect(self.db_path)
+                    raw.row_factory = sqlite_mod.Row
                     raw.execute(
                         f"PRAGMA journal_mode={self.config.sqlite_journal_mode}"
                     )
@@ -157,6 +163,29 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
                     self._init_schema()
                     self._migrate()
         return self._conn
+
+    @staticmethod
+    def _connect(db_path: str):
+        """Open a SQLite connection, preferring pysqlite3 when it can load extensions.
+
+        The stdlib ``sqlite3`` module is sometimes compiled without
+        ``ENABLE_LOAD_EXTENSION`` (e.g. manylinux wheels).  pysqlite3-binary
+        ships a build that does support extensions, which lets sqlite-vec
+        load.  Fall back to stdlib if pysqlite3 is unavailable or also lacks
+        extension loading.
+
+        Returns ``(connection, sqlite_module)`` so callers can use the
+        matching ``Row`` factory and other module-level constants.
+        """
+        if _pysqlite3 is not None:
+            try:
+                raw = _pysqlite3.connect(db_path, check_same_thread=False)
+                if hasattr(raw, "enable_load_extension") and hasattr(raw, "load_extension"):
+                    return raw, _pysqlite3
+                raw.close()
+            except Exception:  # pragma: no cover
+                pass
+        return sqlite3.connect(db_path, check_same_thread=False), sqlite3
 
     @contextmanager
     def transaction(self):

@@ -15,10 +15,14 @@ from memlife import MemoryConfig, MemoryStore, DummyEmbedder, vec_backend
 
 def _extension_loading_available() -> bool:
     try:
-        conn = sqlite3.connect(":memory:")
-        return hasattr(conn, "enable_load_extension") and vec_backend.available()
+        # Match the store's driver selection: pysqlite3 may support
+        # extensions when the stdlib sqlite3 module does not.
+        import pysqlite3.dbapi2 as pysqlite3_sqlite3  # type: ignore[import-not-found]
+
+        conn = pysqlite3_sqlite3.connect(":memory:")
     except Exception:
-        return False
+        conn = sqlite3.connect(":memory:")
+    return hasattr(conn, "enable_load_extension") and vec_backend.available()
 
 
 @pytest.mark.asyncio
