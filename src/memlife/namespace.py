@@ -22,10 +22,14 @@ def validate_namespace(name: str | None) -> str:
     Raises NamespaceError if the name is empty, too long, contains path
     separators, control characters, '..' or any character outside the
     allowed set.
+
+    Namespaces are normalized to lowercase so that identifiers like ``"Julie"``
+    and ``"julie"`` map to the same directory on case-sensitive filesystems,
+    matching the behaviour on case-insensitive filesystems (macOS, Windows).
     """
     if name is None:
         raise NamespaceError("namespace cannot be None")
-    name = name.strip()
+    name = name.strip().lower()
     if not name:
         raise NamespaceError("namespace cannot be empty")
     if len(name) > _MAX_NAMESPACE_LEN:

@@ -98,5 +98,5 @@ class SqliteVecBackend(VectorBackend):
 
     def _raw_conn(self):
         """Return the underlying sqlite3.Connection from the store's locked wrapper."""
-        conn = self._store.conn
+        conn = self._memory_store.conn
         return conn._raw if hasattr(conn, "_raw") else conn

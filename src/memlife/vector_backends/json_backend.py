@@ -48,7 +48,7 @@ class JsonVectorBackend(VectorBackend):
         """
         if not vec:
             return ""
-        if self._store.config.use_binary_vectors:
+        if self._memory_store.config.use_binary_vectors:
             packed = binary_vectors.binarize(vec)
             return f"binary:{len(vec)}:{base64.b64encode(packed).decode()}"
         return json.dumps(vec)
@@ -95,7 +95,7 @@ class JsonVectorBackend(VectorBackend):
         table = self._table_for_kind(kind)
         if not table:
             return False
-        self._store.conn.execute(
+        self._memory_store.conn.execute(
             f"UPDATE {table} SET embedding_json = '', embedding_model = '' WHERE id = ?",
             (item_id,),
         )
@@ -112,7 +112,7 @@ class JsonVectorBackend(VectorBackend):
         table, _ = self._table_and_filter_for_kind(kind)
         if not table:
             return []
-        rows = self._store.conn.execute(
+        rows = self._memory_store.conn.execute(
             f"SELECT id, embedding_json FROM {table} WHERE embedding_json != ''"
         ).fetchall()
         results: list[VectorSearchResult] = []

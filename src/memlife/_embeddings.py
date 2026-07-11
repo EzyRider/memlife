@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from memlife.vector_backends.base import VectorBackend
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class EmbedMixin:
     embedder: object
     embedding_model_name: str
     _embed_failures: int
-    vector_backend: "memlife.vector_backends.base.VectorBackend"
+    vector_backend: "VectorBackend"
 
     def _serialize_vec(self, vec: list[float]) -> str:
         """Serialize a float vector for storage."""

@@ -17,7 +17,13 @@ from memlife import (
 def test_valid_namespace():
     assert validate_namespace("ingrid") == "ingrid"
     assert validate_namespace("  openclaw  ") == "openclaw"
-    assert validate_namespace("user_42-X") == "user_42-X"
+    assert validate_namespace("user_42-X") == "user_42-x"
+
+
+def test_namespace_case_normalized():
+    assert validate_namespace("Julie") == "julie"
+    assert validate_namespace("InGrid") == "ingrid"
+    assert validate_namespace("USER_42") == "user_42"
 
 
 def test_invalid_namespaces():
@@ -79,3 +85,16 @@ def test_switch_namespace_rejects_invalid(tmp_path):
     with pytest.raises(NamespaceError):
         s1.switch_namespace("a/b")
     s1.close()
+
+
+def test_switch_namespace_rejects_model_mismatch(tmp_path):
+    s1 = MemoryStore(
+        config=MemoryConfig(
+            data_dir=str(tmp_path), namespace="a", embedding_model="model-a"
+        ),
+        embedder=DummyEmbedder(),
+    )
+    s2 = s1.switch_namespace("b")
+    assert s2.config.embedding_model == "model-a"
+    s1.close()
+    s2.close()

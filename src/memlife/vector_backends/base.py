@@ -34,12 +34,12 @@ class VectorBackend(ABC):
     """
 
     def __init__(self, store: MemoryStore) -> None:
-        self._store = store
+        self._memory_store = store
 
     @property
-    def store(self) -> MemoryStore:
+    def memory_store(self) -> MemoryStore:
         """The MemoryStore instance this backend is scoped to."""
-        return self._store
+        return self._memory_store
 
     @property
     @abstractmethod

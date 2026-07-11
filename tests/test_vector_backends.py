@@ -10,7 +10,6 @@ from memlife import (
     MemoryConfig,
     MemoryStore,
     SqliteVecBackend,
-    VectorBackend,
     VectorSearchResult,
     create_vector_backend,
 )

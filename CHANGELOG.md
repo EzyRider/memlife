@@ -81,6 +81,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graph traversal results now include `created_at` so consumers can compute
   decay anchors consistently.
 
+## [0.4.4] - 2026-07-11
+
+### Security
+
+- Validate `MemoryConfig.namespace` against `^[a-zA-Z0-9_-]+$` and reject path
+  separators, `..`, control characters, and empty names. Raises `NamespaceError`.
+  Previously a crafted namespace could escape `data_dir` and access arbitrary
+  files.
+
+### Added
+
+- `memlife.NamespaceError`, `memlife.validate_namespace()`, and
+  `memlife.list_namespaces()`.
+- `MemoryStore.switch_namespace()` returns a new store bound to a different
+  namespace.
+
 ## [0.4.2] - 2026-07-11
 
 ### Fixed
