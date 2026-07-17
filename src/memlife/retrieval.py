@@ -201,14 +201,16 @@ def _graph_expand(
 
     Steps:
       1. Extract entities from the query.
-      2. For each entity, find triples where it appears and collect the
-         source row ids from triple provenance.
-      3. Load those facts/episodes/journal entries and score them with a
-         small graph signal.
+      2. For each entity, find currently-valid triples where it appears and
+         collect the source row ids from triple provenance.
+      3. Follow outgoing relationship triples to related entities and collect
+         their mention-triple sources.
+      4. Load those facts/episodes/journal entries and score them with a
+         graph signal scaled by the best linking triple's confidence.
 
     The graph signal is independent of vector/text similarity: a source row
-    linked to a query entity gets a base boost, scaled by the confidence of
-    the linking triple(s) and decayed by recency of the source row.
+    linked to a query entity gets a boost proportional to the confidence of
+    the strongest currently-valid linking triple.
     """
     if not getattr(config, "use_graph_retrieval", False):
         return []
@@ -227,39 +229,54 @@ def _graph_expand(
     seen_ids: dict[str, set[str]] = {"episode": set(), "fact": set(), "journal": set()}
 
     for canonical, _alias in extracted:
-        source_map = store.source_ids_linked_to_entity(
+        # Direct mention links + relationship-hop links, each tagged with the
+        # linking triple record so we can scale the graph signal and show
+        # provenance in debug output.
+        score_map = store.source_scores_linked_to_entity(
             canonical, predicate=None, source_kinds={"fact", "episode", "journal"}, limit=100
         )
-        # Also follow relationship triples from the query entity to related
-        # entities and pull their sources. This lets "projects James works on"
-        # find project-linked rows even if James isn't directly mentioned in them.
-        rel_sources = store.source_ids_linked_via_relationship(
+        rel_scores = store.source_scores_linked_via_relationship(
             canonical, predicate=None, source_kinds={"fact", "episode", "journal"}, limit=100
         )
-        for kind, ids in rel_sources.items():
-            source_map.setdefault(kind, []).extend(ids)
+        for kind, entries in rel_scores.items():
+            score_map.setdefault(kind, []).extend(entries)
 
+        # Aggregate per source: keep the best triple confidence and the triple(s)
+        # that achieved it.  This also deduplicates repeated source ids.
+        per_source: dict[str, dict[str, tuple[float, list[dict]]]] = {}
+        for kind, entries in score_map.items():
+            src_scores: dict[str, tuple[float, list[dict]]] = {}
+            for sid, triple in entries:
+                conf = triple.get("confidence", 0.5)
+                if sid not in src_scores or conf > src_scores[sid][0]:
+                    src_scores[sid] = (conf, [triple])
+                elif conf == src_scores[sid][0]:
+                    src_scores[sid][1].append(triple)
+            per_source[kind] = src_scores
+
+        source_map = {kind: list(src_scores.keys()) for kind, src_scores in per_source.items()}
         eps, facts, journals = _load_linked_sources(store, source_map)
 
         for ep in eps:
             if ep.id in seen_ids["episode"]:
                 continue
             seen_ids["episode"].add(ep.id)
+            graph_signal, graph_triples = per_source["episode"][ep.id]
             text_score = _text_score_for(query_tokens, ep.index_text())
             source_weight = _SOURCE_WEIGHTS["episode"]
             conf = 1.0 if ep.is_success else 0.5
             halflife = _episode_halflife(ep, config)
             rec = recency_weight(ep.created_at, halflife)
-            c = _candidate(
-                ep, "episode", conf, rec, 0.0, text_score, source_weight, 0.5
-            )
-            c.graph_signal = 1.0
-            candidates.append(c)
+            candidates.append(_candidate(
+                ep, "episode", conf, rec, 0.0, text_score, source_weight, 0.5,
+                graph_signal=graph_signal, graph_triples=graph_triples,
+            ))
 
         for f in facts:
-            if f.id in seen_ids["fact"]:
+            if f.id in seen_ids["fact"] or f.superseded_by:
                 continue
             seen_ids["fact"].add(f.id)
+            graph_signal, graph_triples = per_source["fact"][f.id]
             text_score = _text_score_for(query_tokens, f.content)
             source_weight = _SOURCE_WEIGHTS.get(f.source, _SOURCE_WEIGHTS["agent"])
             rec = recency_weight(f.updated_at, decay["fact"])
@@ -267,17 +284,16 @@ def _graph_expand(
             eff_conf = f.effective_confidence(
                 config.fact_decay_halflife_days, config.fact_decay_floor
             )
-            c = _candidate(
+            candidates.append(_candidate(
                 f, "fact", eff_conf, rec, 0.0, text_score, source_weight, veracity,
-                fact_id=f.id,
-            )
-            c.graph_signal = 1.0
-            candidates.append(c)
+                fact_id=f.id, graph_signal=graph_signal, graph_triples=graph_triples,
+            ))
 
         for j in journals:
-            if j.id in seen_ids["journal"]:
+            if j.id in seen_ids["journal"] or j.superseded or j.retired or j.type == "contradiction":
                 continue
             seen_ids["journal"].add(j.id)
+            graph_signal, graph_triples = per_source["journal"][j.id]
             text_score = _text_score_for(query_tokens, j.content)
             source_weight = _SOURCE_WEIGHTS["journal"]
             eff_conf = j.effective_confidence(
@@ -286,11 +302,10 @@ def _graph_expand(
             )
             rec = recency_weight(j.created_at, decay["journal"])
             veracity = _veracity_for_journal(store, j)
-            c = _candidate(
-                j, "journal", eff_conf, rec, 0.0, text_score, source_weight, veracity
-            )
-            c.graph_signal = 1.0
-            candidates.append(c)
+            candidates.append(_candidate(
+                j, "journal", eff_conf, rec, 0.0, text_score, source_weight, veracity,
+                graph_signal=graph_signal, graph_triples=graph_triples,
+            ))
 
     return candidates
 
@@ -355,10 +370,16 @@ async def retrieve(
     # ------------------------------------------------------------------
     # Graph expansion (0.6.0)
     # ------------------------------------------------------------------
-    graph_candidates = _graph_expand(store, query, query_tokens, config)
+    graph_candidates: list[_RecallSignals] = []
+    try:
+        graph_candidates = _graph_expand(store, query, query_tokens, config)
+    except Exception as exc:
+        logger.debug("graph expansion failed: %s", exc)
     if graph_candidates:
         counters["graph_candidates"] = counters.get("graph_candidates", 0) + len(graph_candidates)
         candidates.extend(graph_candidates)
+
+    graph_episode_ids = {c.item.id for c in graph_candidates if c.kind == "episode"}
 
     # ------------------------------------------------------------------
     # Episodes
@@ -378,6 +399,8 @@ async def retrieve(
 
     counters["episodes_considered"] += len(episodes)
     for ep in episodes:
+        if ep.id in graph_episode_ids:
+            continue
         vector_sim = getattr(ep, "_vector_sim", 0.0)
         text_score = _text_score_for(query_tokens, ep.index_text())
         source_weight = _source_weight_for(ep)
@@ -486,12 +509,15 @@ async def retrieve(
         from memlife import polyphonic
 
         counters["polyphonic_fusion_calls"] += 1
+        # Apply RRF only to candidates that passed the score cutoff, so cutoff
+        # config remains meaningful and low-scored vector/text matches cannot
+        # be rescued purely by rank aggregation.
         voice_groups: dict[str, list[_RecallSignals]] = {
-            "vector": sorted(candidates, key=lambda c: c.vector_sim, reverse=True),
-            "text": sorted(candidates, key=lambda c: c.text_score, reverse=True),
-            "source": sorted(candidates, key=lambda c: c.source_weight, reverse=True),
-            "veracity": sorted(candidates, key=lambda c: c.veracity, reverse=True),
-            "recency": sorted(candidates, key=lambda c: c.recency, reverse=True),
+            "vector": sorted(pool, key=lambda c: c.vector_sim, reverse=True),
+            "text": sorted(pool, key=lambda c: c.text_score, reverse=True),
+            "source": sorted(pool, key=lambda c: c.source_weight, reverse=True),
+            "veracity": sorted(pool, key=lambda c: c.veracity, reverse=True),
+            "recency": sorted(pool, key=lambda c: c.recency, reverse=True),
         }
         pool = polyphonic.fuse_candidates(voice_groups, config)[:top_n]
         # Count how many candidates each voice contributed to the fused pool.
@@ -638,6 +664,8 @@ def _candidate(
     source_weight: float,
     veracity: float,
     fact_id: str = "",
+    graph_signal: float = 0.0,
+    graph_triples: list[dict] | None = None,
 ) -> _RecallSignals:
     """Build a recall-signals object with a human-readable label."""
     if isinstance(item, Episode):
@@ -665,8 +693,8 @@ def _candidate(
         text_score=text_score,
         source_weight=source_weight,
         veracity=veracity,
-        graph_signal=0.0,
-        graph_triples=[],
+        graph_signal=graph_signal,
+        graph_triples=graph_triples or [],
         confidence=confidence,
         recency=recency,
         relevance=0.0,

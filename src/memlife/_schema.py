@@ -456,6 +456,9 @@ class SchemaMixin:
         fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(facts)")}
         if "annotations_json" not in fcols:
             self.conn.execute("ALTER TABLE facts ADD COLUMN annotations_json TEXT DEFAULT '[]'")
+        # Re-read journal columns: earlier migration steps may have just added
+        # columns, so the jcols snapshot from the start of _migrate() is stale.
+        jcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(journal)")}
         if "annotations_json" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN annotations_json TEXT DEFAULT '[]'")
         if "links_json" not in jcols:

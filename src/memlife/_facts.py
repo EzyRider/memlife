@@ -358,7 +358,7 @@ class FactStore:
             if match_count == 0:
                 continue
             score = match_count / max(1, len(tokens))
-            if score >= 0.5:
+            if score >= self.fact_conflict_threshold:
                 conflicts.append({
                     "id": f.id,
                     "content": f.content,

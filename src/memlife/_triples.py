@@ -316,6 +316,33 @@ class TripleMixin:
             for r in rows
         ]
 
+    def source_scores_linked_to_entity(
+        self,
+        entity: str,
+        predicate: str | None = None,
+        source_kinds: set[str] | None = None,
+        limit: int = 100,
+    ) -> dict[str, list[tuple[str, dict]]]:
+        """Return source rows linked to ``entity`` with linking triple records.
+
+        Returns ``{source_kind: [(source_id, triple_dict), ...]}``.  Only
+        currently-valid triples (``valid_until IS NULL``) are considered, and a
+        source may appear multiple times if it is linked by several triples.
+        """
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
+        source_kinds = source_kinds or {"fact", "episode", "journal"}
+        triples = self.triples_about(canonical, predicate=predicate, limit=limit)
+        result: dict[str, list[tuple[str, dict]]] = {}
+        for t in triples:
+            if t.get("valid_until") is not None:
+                continue
+            for prov in t.get("provenance", []):
+                kind = prov.get("kind", "").lower()
+                sid = prov.get("id", "").strip()
+                if kind in source_kinds and sid and t.get("id"):
+                    result.setdefault(kind, []).append((sid, t))
+        return result
+
     def source_ids_linked_to_entity(
         self,
         entity: str,
@@ -323,22 +350,47 @@ class TripleMixin:
         source_kinds: set[str] | None = None,
         limit: int = 100,
     ) -> dict[str, list[str]]:
-        """Return source row ids that mention ``entity`` via triple provenance.
+        """Return source row ids that mention ``entity`` via triple provenance."""
+        result: dict[str, list[str]] = {}
+        for kind, entries in self.source_scores_linked_to_entity(
+            entity, predicate=predicate, source_kinds=source_kinds, limit=limit
+        ).items():
+            result[kind] = [sid for sid, _triple in entries]
+        return result
 
-        Looks up triples where ``entity`` appears as subject or object, then
-        returns the provenance source ids grouped by source kind. Only
-        provenance entries whose kind is in ``source_kinds`` are returned.
+    def source_scores_linked_via_relationship(
+        self,
+        entity: str,
+        predicate: str | None = None,
+        source_kinds: set[str] | None = None,
+        limit: int = 100,
+    ) -> dict[str, list[tuple[str, dict]]]:
+        """Return source rows linked to ``entity`` through relationship triples.
+
+        For each currently-valid outgoing relationship triple from ``entity``,
+        the object is treated as a related entity and its mention-triple
+        provenance is collected along with the full mention triple record.
         """
         canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
         source_kinds = source_kinds or {"fact", "episode", "journal"}
-        triples = self.triples_about(canonical, predicate=predicate, limit=limit)
-        result: dict[str, list[str]] = {}
-        for t in triples:
-            for prov in t.get("provenance", []):
-                kind = prov.get("kind", "").lower()
-                sid = prov.get("id", "").strip()
-                if kind in source_kinds and sid:
-                    result.setdefault(kind, []).append(sid)
+        result: dict[str, list[tuple[str, dict]]] = {}
+        # Outgoing relationship triples from the entity (subject == entity).
+        sql = (
+            "SELECT id, object FROM temporal_triples WHERE subject = ? "
+            "AND predicate != 'mentions' AND valid_until IS NULL "
+        )
+        params: list = [canonical]
+        if predicate:
+            sql += "AND predicate = ? "
+            params.append(predicate.strip())
+        sql += "ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.conn.execute(sql, params).fetchall()
+        for _triple_id, obj in rows:
+            for kind, entries in self.source_scores_linked_to_entity(
+                obj, predicate="mentions", source_kinds=source_kinds, limit=limit
+            ).items():
+                result.setdefault(kind, []).extend(entries)
         return result
 
     def source_ids_linked_via_relationship(
@@ -348,33 +400,12 @@ class TripleMixin:
         source_kinds: set[str] | None = None,
         limit: int = 100,
     ) -> dict[str, list[str]]:
-        """Return source row ids linked to ``entity`` through relationship triples.
-
-        Unlike ``source_ids_linked_to_entity`` (which uses provenance on
-        mention triples), this method treats relationship triples themselves as
-        edges. For each triple where ``entity`` is the subject, the object is
-        treated as a related entity; we then collect source rows linked to that
-        related entity via mention triple provenance. This lets a query about
-        ``James`` surface rows that mention ``memlife`` when the graph knows
-        ``James works_on memlife``.
-        """
-        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
-        source_kinds = source_kinds or {"fact", "episode", "journal"}
+        """Return source row ids linked to ``entity`` through relationship triples."""
         result: dict[str, list[str]] = {}
-        # Outgoing relationship triples from the entity (subject == entity).
-        rows = self.conn.execute(
-            "SELECT id, object FROM temporal_triples WHERE subject = ? "
-            "AND predicate != 'mentions' "
-            + ("AND predicate = ? " if predicate else "")
-            + "ORDER BY created_at DESC LIMIT ?",
-            (canonical,) + ((predicate.strip(),) if predicate else ()) + (limit,),
-        ).fetchall()
-        for triple_id, obj in rows:
-            source_map = self.source_ids_linked_to_entity(
-                obj, predicate="mentions", source_kinds=source_kinds, limit=limit
-            )
-            for kind, ids in source_map.items():
-                result.setdefault(kind, []).extend(ids)
+        for kind, entries in self.source_scores_linked_via_relationship(
+            entity, predicate=predicate, source_kinds=source_kinds, limit=limit
+        ).items():
+            result[kind] = [sid for sid, _triple in entries]
         return result
 
     def triples_to(

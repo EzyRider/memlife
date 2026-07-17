@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-18
+
+### Fixed
+
+- `_schema._migrate()` now re-reads `journal` columns before adding
+  `annotations_json` / `links_json`, making migration idempotent on
+  partially-migrated databases.
+- `FactStore.check_conflicts()` keyword fallback now respects
+  `fact_conflict_threshold` instead of hardcoding 0.5.
+- Graph-integrated retrieval now scales `graph_signal` by the confidence of
+  the strongest currently-valid linking triple, rather than giving every
+  linked candidate a flat 1.0 boost.
+- Graph retrieval no longer surfaces superseded facts, retired/superseded
+  journal entries, or contradiction rows.
+- `retrieve()` now skips vector-recalled episodes that were already added
+  via graph expansion, avoiding duplicate episode candidates.
+- Graph expansion failures are caught and logged instead of crashing the
+  whole retrieval call.
+- Polyphonic recall now runs RRF only on candidates that passed the score
+  cutoff, so cutoff configuration remains meaningful.
+- Debug output now includes the actual triples that produced a graph link
+  in `graph_triples`.
+
 ## [0.6.0] - 2026-07-18
 
 ### Added
