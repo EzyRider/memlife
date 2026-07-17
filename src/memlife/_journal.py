@@ -205,6 +205,8 @@ class JournalStore:
              1 if private else 0, time.time(), last_detected),
         )
         self.conn.commit()
+        if getattr(self.config, "auto_entity_extraction", False):
+            self.extract_and_link_entities("journal", jid, content)
         return jid
 
     async def embed_journal_entry(self, jid: str) -> None:

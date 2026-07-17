@@ -104,27 +104,36 @@ on `(model_name, sha256(text))` and stored as canonical JSON floats so switching
 
 ### 2.2 Automatic entity extraction from free-form text
 
-The graph storage exists, but entities are only created when a caller
-explicitly invokes `store_triple`/`store_fact_triple` or when MEMORIA
-reflection emits a labelled KG triple. There is no automatic extraction from
-arbitrary facts, episodes, or journal entries.
+**Status: shipped.**
 
-**Goal:** Given a fact, episode, or journal entry, extract entity mentions
-and (optionally) relations, then link them into the existing triple/entity
-layer.
+The graph storage exists, but entities were only created when a caller
+explicitly invoked `store_triple`/`store_fact_triple` or when MEMORIA
+reflection emitted a labelled KG triple. Automatic extraction from arbitrary
+facts, episodes, and journal entries is now implemented.
 
-**Approaches to evaluate:**
-1. **Zero-dependency regex/NER heuristics** — preserve the no-LLM contract.
-2. **LLM-based extraction** — opt-in, gated by `config`, used during reflection.
-3. **Hybrid** — regex for entities, LLM only for relation classification.
+**What works:**
+- `MemoryConfig.auto_entity_extraction: bool = False` (opt-in).
+- `MemoryConfig.auto_entity_mentions: bool = True` creates `mentions` triples
+  linking each source row to the entities it contains.
+- `MemoryConfig.auto_entity_confidence: float = 0.6` for generated mention
+  triples.
+- `entity_extraction_allowlist` / `entity_extraction_blocklist` for tuning.
+- Heuristic, zero-LLM extractor in `memlife.entity_extractor`:
+  - Capitalised phrases (proper nouns).
+  - Known terms from an allowlist.
+  - Short uppercase acronyms.
+  - Deduplication and blocklist filtering.
+- Hooked into `store_fact()`, `remember()`, and `add_journal_entry()`.
+- Mention triples are GC'd automatically when their source row is pruned.
+- Orphan entities/aliases are removed by the existing entity/alias GC.
 
-**Scope for 0.6.0 MVP:**
-- Extract canonical entity mentions from fact content and episode task/summary.
-- Create `entity_aliases` entries for variants seen in text.
-- Optionally create `mentions` triples (e.g. `fact_abc mentions Entity`) so
-  retrieval can follow the link.
-- Keep it deterministic and reversible (GC should clean up auto-created
-  entities when the source fact is pruned).
+**Env vars:**
+- `MEMLIFE_AUTO_ENTITY_EXTRACTION`
+- `MEMLIFE_AUTO_ENTITY_MENTIONS`
+- `MEMLIFE_AUTO_ENTITY_CONFIDENCE`
+
+**Remaining follow-ups:**
+- Graph-integrated retrieval (2.3) can now consume these `mentions` triples.
 
 ### 2.3 Graph-integrated retrieval
 

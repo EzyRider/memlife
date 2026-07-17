@@ -96,6 +96,68 @@ class TripleMixin:
         self.conn.commit()
         return triple_id
 
+    def store_mention_triple(
+        self,
+        source_kind: str,
+        source_id: str,
+        entity: str,
+        confidence: float = 0.6,
+    ) -> str:
+        """Record that ``source_id`` (a fact/episode/journal) mentions ``entity``.
+
+        This creates a lightweight ``mentions`` triple whose subject is the
+        source row id and whose object is the canonical entity name. Only the
+        object is treated as an entity; the source id is a foreign key, not a
+        graph node. The triple is tagged with provenance so GC can remove it
+        when the source row is pruned. Returns the triple id.
+        """
+        now = time.time()
+        triple_id = f"triple_{uuid.uuid4().hex[:12]}"
+        canonical = self.resolve_entity(entity.strip()) or entity.strip()
+        self._ensure_entity(canonical)
+        self.conn.execute(
+            "INSERT INTO temporal_triples "
+            "(id, subject, predicate, object, valid_from, valid_until, "
+            "fact_id, confidence, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (triple_id, source_id.strip(), "mentions", canonical,
+             now, None, None, min(float(confidence), MAX_FACT_CONFIDENCE), now),
+        )
+        self._add_triple_provenance(triple_id, [{"kind": source_kind, "id": source_id}])
+        self.conn.commit()
+        return triple_id
+
+    def extract_and_link_entities(
+        self,
+        source_kind: str,
+        source_id: str,
+        text: str,
+    ) -> None:
+        """Extract entities from ``text`` and link them to ``source_id``.
+
+        This is a no-op if ``auto_entity_extraction`` is disabled or if the
+        extractor finds nothing. Aliases and mention triples are only created
+        when ``auto_entity_mentions`` is True (default).
+        """
+        from memlife.entity_extractor import extract_entities
+
+        if not getattr(self.config, "auto_entity_extraction", False):
+            return
+        mentions_enabled = getattr(self.config, "auto_entity_mentions", True)
+        confidence = getattr(self.config, "auto_entity_confidence", 0.6)
+        allowlist = getattr(self.config, "entity_extraction_allowlist", None)
+        blocklist = getattr(self.config, "entity_extraction_blocklist", None)
+
+        for canonical, alias in extract_entities(
+            text, allowlist=allowlist, blocklist=blocklist
+        ):
+            self._ensure_entity(canonical)
+            # Store an alias if the original casing differs from the canonical.
+            if alias and alias != canonical:
+                self.add_entity_alias(canonical, alias)
+            if mentions_enabled:
+                self.store_mention_triple(source_kind, source_id, canonical, confidence)
+
     def expire_triples_for_fact(self, fact_id: str, valid_until: float | None = None) -> int:
         """Close currently-open triples linked to ``fact_id``.
 

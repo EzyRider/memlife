@@ -202,18 +202,38 @@ class GCMixin:
         pruned: dict[str, int] = {}
 
         # Superseded facts (superseded_by is set, and updated_at is old).
-        cur = self.conn.execute(
-            "DELETE FROM facts WHERE superseded_by != '' AND updated_at < ?",
-            (cutoff_facts,),
-        )
-        pruned["superseded_facts"] = cur.rowcount
+        old_fact_ids = [
+            r[0] for r in self.conn.execute(
+                "SELECT id FROM facts WHERE superseded_by != '' AND updated_at < ?",
+                (cutoff_facts,),
+            ).fetchall()
+        ]
+        if old_fact_ids:
+            placeholders = ",".join("?" * len(old_fact_ids))
+            cur = self.conn.execute(
+                f"DELETE FROM facts WHERE id IN ({placeholders})",
+                old_fact_ids,
+            )
+            pruned["superseded_facts"] = cur.rowcount
+        else:
+            pruned["superseded_facts"] = 0
 
         # Superseded journal entries.
-        cur = self.conn.execute(
-            "DELETE FROM journal WHERE superseded_by != '' AND created_at < ?",
-            (cutoff_journal,),
-        )
-        pruned["superseded_journal"] = cur.rowcount
+        old_journal_ids = [
+            r[0] for r in self.conn.execute(
+                "SELECT id FROM journal WHERE superseded_by != '' AND created_at < ?",
+                (cutoff_journal,),
+            ).fetchall()
+        ]
+        if old_journal_ids:
+            placeholders = ",".join("?" * len(old_journal_ids))
+            cur = self.conn.execute(
+                f"DELETE FROM journal WHERE id IN ({placeholders})",
+                old_journal_ids,
+            )
+            pruned["superseded_journal"] = cur.rowcount
+        else:
+            pruned["superseded_journal"] = 0
 
         # Completed agent runs and their checkpoints.
         old_run_ids = [
@@ -256,16 +276,41 @@ class GCMixin:
 
         # Old episodes and their tool index entries (MF-009).
         cutoff_episodes = now - (episodes_days * 86400)
-        cur = self.conn.execute(
-            "DELETE FROM episodes WHERE created_at < ?",
-            (cutoff_episodes,),
-        )
-        pruned["episodes"] = cur.rowcount
+        old_episode_ids = [
+            r[0] for r in self.conn.execute(
+                "SELECT id FROM episodes WHERE created_at < ?",
+                (cutoff_episodes,),
+            ).fetchall()
+        ]
+        if old_episode_ids:
+            placeholders = ",".join("?" * len(old_episode_ids))
+            cur = self.conn.execute(
+                f"DELETE FROM episodes WHERE id IN ({placeholders})",
+                old_episode_ids,
+            )
+            pruned["episodes"] = cur.rowcount
+        else:
+            pruned["episodes"] = 0
         cur_tools = self.conn.execute(
             "DELETE FROM episode_tools WHERE episode_id NOT IN "
             "(SELECT id FROM episodes)"
         )
         pruned["episode_tools"] = cur_tools.rowcount
+
+        # 0.6.0: prune auto-extracted "mentions" triples whose source row has
+        # just been deleted. This keeps the entity graph reversible: when a fact,
+        # episode, or journal entry is GC'd, its mention triples go too.
+        all_deleted_source_ids = old_fact_ids + old_episode_ids + old_journal_ids
+        if all_deleted_source_ids:
+            placeholders = ",".join("?" * len(all_deleted_source_ids))
+            cur = self.conn.execute(
+                f"DELETE FROM temporal_triples WHERE predicate = 'mentions' "
+                f"AND subject IN ({placeholders})",
+                all_deleted_source_ids,
+            )
+            pruned["mention_triples_for_deleted_sources"] = cur.rowcount
+        else:
+            pruned["mention_triples_for_deleted_sources"] = 0
 
         # MV2-003/MV2-010: prune closed temporal triples, orphaned
         # provenance rows, and entities/aliases with no live triples.

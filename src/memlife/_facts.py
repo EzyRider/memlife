@@ -144,6 +144,8 @@ class FactStore:
         if new_vec:
             self._maybe_store_vec("facts", fact_id, new_vec)
         self.conn.commit()
+        if getattr(self.config, "auto_entity_extraction", False):
+            self.extract_and_link_entities("fact", fact_id, content)
         return fact_id
 
     def _refresh_fact(self, fact_id: str, extra_confidence: float) -> None:

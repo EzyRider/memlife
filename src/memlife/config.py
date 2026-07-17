@@ -121,6 +121,15 @@ class MemoryConfig:
     gc_episodes_days: int = 180  # MF-009: episodes were never pruned
     gc_closed_triples_days: int = 90  # MV2-003: closed temporal triples
 
+    # Automatic entity extraction (0.6.0).  When enabled, facts/episodes/journal
+    # entries have entity mentions extracted heuristically and linked into the
+    # entity graph. This is deterministic, zero-LLM, and reversible via GC.
+    auto_entity_extraction: bool = False
+    auto_entity_mentions: bool = True  # create "mentions" triples for extracted entities
+    auto_entity_confidence: float = 0.6
+    entity_extraction_allowlist: set[str] | frozenset[str] | None = None
+    entity_extraction_blocklist: set[str] | frozenset[str] | None = None
+
     # Optional infrastructure backends (MV2-I001..I004).  All default off.
     use_sqlite_vec: bool = False
     use_binary_vectors: bool = False
@@ -290,4 +299,7 @@ class MemoryConfig:
             vector_backend=os.getenv("MEMLIFE_VECTOR_BACKEND", None),
             embedding_cache_enabled=_bool("MEMLIFE_EMBEDDING_CACHE_ENABLED", True),
             embedding_cache_max_mb=int(os.getenv("MEMLIFE_EMBEDDING_CACHE_MAX_MB", "512")),
+            auto_entity_extraction=_bool("MEMLIFE_AUTO_ENTITY_EXTRACTION", False),
+            auto_entity_mentions=_bool("MEMLIFE_AUTO_ENTITY_MENTIONS", True),
+            auto_entity_confidence=float(os.getenv("MEMLIFE_AUTO_ENTITY_CONFIDENCE", "0.6")),
         )

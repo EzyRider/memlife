@@ -95,6 +95,9 @@ class EpisodeStore:
         except Exception:
             self.conn.rollback()
             raise
+        if getattr(self.config, "auto_entity_extraction", False):
+            text = f"{task}\n{summary or ''}".strip()
+            self.extract_and_link_entities("episode", ep_id, text)
         return ep_id
 
     def _format_gap(self, gap_hours: float) -> str:
