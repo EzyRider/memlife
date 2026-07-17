@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-18
+
+### Changed
+
+- README now reports the current version and includes a "What's New" section.
+- `memlife.__version__` and `pyproject.toml` version bumped to 0.6.3.
+
 ## [0.6.2] - 2026-07-18
 
 ### Fixed

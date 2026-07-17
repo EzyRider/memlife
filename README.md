@@ -6,7 +6,26 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.5.5**
+**Current version: 0.6.3**
+
+## What's New
+
+### 0.6.3
+- README and version metadata are now kept in sync with releases.
+
+### 0.6.2
+- Graph relationship traversal now follows **incoming** edges as well as outgoing edges.
+- Entity canonicalisation is case-insensitive, preventing duplicate `James`/`james` nodes.
+- `retrieve()` accepts `debug=True` and `SyncMemoryStore.store_mention_triple()` was added for API parity.
+
+### 0.6.1
+- Migration idempotency fix, `fact_conflict_threshold` wired correctly, and graph-integrated retrieval scoring improvements.
+- Polyphonic recall respects the score cutoff and debug output includes linking triples.
+
+### 0.6.0
+- **Embedding cache** — content-addressable, LRU-capped embedding cache.
+- **Automatic entity extraction** — deterministic, zero-LLM extraction of entities from facts, episodes, and journal entries.
+- **Graph-integrated retrieval** — `retrieve()` boosts candidates linked to entities mentioned in the query.
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
