@@ -78,29 +78,29 @@ already shipped and tested:
 
 ### 2.1 Embedding cache / model-versioned vectors (lead 0.6.0 item)
 
-There is no content-addressable embedding cache today. Every `store_fact`,
-`store_triple` (when triples carry embeddings), journal entry, and episode
-re-embeds text even if the same text was embedded moments ago with the same
-model.
+**Status: shipped in `0fed63d`.**
 
-**Goal:** Cache vectors keyed on `(model_name, sha256(text))` so that:
-- Model swaps are cheap (only new/changed text hits the embedder).
-- Repeated text (e.g. reflection re-processing the same episode) is instant.
-- The cache is namespace-aware or stored inside each SQLite file so sharing
-  an embedder across namespaces remains safe.
+A content-addressable embedding cache is now implemented. Vectors are keyed
+on `(model_name, sha256(text))` and stored as canonical JSON floats so switching
+`vector_backend` never leaves cache rows unreadable.
 
-**Interface sketch:**
-- Add `embedding_cache_table` to schema (or reuse a simple SQLite table):
-  `cache_key TEXT PRIMARY KEY, model_name TEXT, text_hash TEXT, vector BLOB,
-  created_at REAL`.
-- Wrap `Embedder.embed()` in `EmbeddingMixin` with a cache read/write path.
-- Provide `MemoryConfig.embedding_cache_enabled: bool = True` and
-  `embedding_cache_max_mb: int = 512` for eviction.
-- `backfill_embeddings()` should prime the cache as it goes.
+**What works:**
+- `embedding_cache` table with `cache_key`, `model_name`, `text_hash`,
+  `vector_json`, `created_at`, `last_used_at`.
+- Cache read/write wrapped into `EmbedMixin.embed_texts()` — only cache misses
+  hit the embedder.
+- `MemoryConfig.embedding_cache_enabled: bool = True` and
+  `embedding_cache_max_mb: int = 512` (env: `MEMLIFE_EMBEDDING_CACHE_ENABLED`,
+  `MEMLIFE_EMBEDDING_CACHE_MAX_MB`).
+- `backfill_embeddings()` primes the cache as it goes.
+- `run_gc()` sweeps unreferenced cache rows and enforces the LRU size cap.
+- `embedding_health()` and `Metrics` expose cache entry/size stats.
+- Migration support for existing databases.
 
-**Why first:** Entity extraction and reflection both repeatedly embed similar
-or identical text. Building the cache before those features makes them cheaper
-and more deterministic.
+**Remaining follow-ups:**
+- Stress-test the cache under model swaps and namespace switches.
+- Decide whether `store_triple` should cache any embedded triple text once
+  triples carry embeddings.
 
 ### 2.2 Automatic entity extraction from free-form text
 
