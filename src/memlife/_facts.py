@@ -227,20 +227,27 @@ class FactStore:
 
     def fact_by_id(self, fact_id: str) -> Fact | None:
         """Fetch a single fact by id, regardless of supersession status."""
-        row = self.conn.execute(
-            "SELECT id, content, source, confidence, embedding_json, "
-            "created_at, updated_at, superseded_by, annotations_json "
-            "FROM facts WHERE id = ?",
-            (fact_id,),
-        ).fetchone()
-        if not row:
-            return None
-        return Fact(
-            id=row[0], content=row[1], source=row[2], confidence=row[3],
-            embedding_json=row[4] or "", created_at=row[5], updated_at=row[6],
-            superseded_by=row[7] or "",
-            annotations_json=row[8] or "[]",
-        )
+        rows = self.facts_by_ids([fact_id])
+        return rows[0] if rows else None
+
+    def facts_by_ids(self, ids: list[str]) -> list[Fact]:
+        """Fetch specific facts by id (preserving no particular order)."""
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT id, content, source, confidence, embedding_json, "
+            f"created_at, updated_at, superseded_by, annotations_json "
+            f"FROM facts WHERE id IN ({placeholders})",
+            tuple(ids),
+        ).fetchall()
+        by_id = {r[0]: Fact(
+            id=r[0], content=r[1], source=r[2], confidence=r[3],
+            embedding_json=r[4] or "", created_at=r[5], updated_at=r[6],
+            superseded_by=r[7] or "",
+            annotations_json=r[8] or "[]",
+        ) for r in rows}
+        return [by_id[i] for i in ids if i in by_id]
 
     def annotate_fact(
         self, fact_id: str, label: str, *, dedupe: bool = True,

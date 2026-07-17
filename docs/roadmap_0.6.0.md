@@ -4,7 +4,7 @@
 > Stale backlog items that are already shipped have been removed.
 > Only genuinely pending work, deferred scale items, and packaging/docs gaps remain.
 >
-> Last updated: 2026-07-11
+> Last updated: 2026-07-18
 
 ## 1. State of `main` (what is already true)
 
@@ -133,25 +133,33 @@ facts, episodes, and journal entries is now implemented.
 - `MEMLIFE_AUTO_ENTITY_CONFIDENCE`
 
 **Remaining follow-ups:**
-- Graph-integrated retrieval (2.3) can now consume these `mentions` triples.
+- Graph-integrated retrieval (2.3) now consumes these `mentions` triples.
 
 ### 2.3 Graph-integrated retrieval
 
-Today `retrieve()` pools episodes, facts, and journal but does not use the
-entity graph. A query like "what projects is James working on?" should be
-able to follow `James --works_on--> Project` triples and boost related facts.
+**Status: shipped.**
 
-**Goal:** Blend graph traversal into the retrieval pipeline without breaking
-the unified `score = relevance × confidence × recency` model.
+`retrieve()` now boosts candidates that are linked to entities mentioned in
+the query. A query like "what projects is James working on?" can follow
+`James --works_on--> Project` triples and surface related facts and episodes
+even when vector/text scores are low.
 
-**Scope for 0.6.0:**
-- Optional graph expansion step: starting from entities mentioned in the query,
-  fetch related triples and the facts/episodes that mention those entities.
-- Add a small graph-recency/confidence signal to candidate scoring.
-- Expose a debug flag so callers can see which triples expanded the result set.
+**What works:**
+- `MemoryConfig.use_graph_retrieval: bool = False` (opt-in).
+- `MemoryConfig.graph_retrieval_weight: float = 0.25` scales the graph
+  signal against the standard relevance score.
+- Entity extraction from the query uses the same deterministic extractor as
+  storage, honouring `entity_extraction_allowlist` / `entity_extraction_blocklist`.
+- Canonical entity resolution is case-insensitive via `entity_aliases`.
+- Graph expansion loads sources linked by `mentions` triples and follows one-hop
+  relationship triples to neighbouring entities.
+- Graph signal scales by triple confidence and source recency.
+- Debug output exposes `graph_signal` and the expanding triples per candidate.
 
-**Gate:** Only if automatic entity extraction (2.2) is in place; otherwise
-there is too little graph data to make retrieval changes meaningful.
+**Remaining follow-ups:**
+- Evaluate whether multi-hop expansion is worth the extra latency.
+- Add dedicated tests for graph-only retrieval (`vector/text/source/veracity
+  weights` all zero).
 
 ### 2.4 Docs / packaging gaps
 

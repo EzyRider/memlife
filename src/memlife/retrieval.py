@@ -9,9 +9,9 @@ The unified score is:
 
 where relevance is a weighted blend of:
 
-    relevance = w_v * vector_sim + w_t * text_score + w_s * source_weight + w_r * veracity
+    relevance = w_v * vector_sim + w_t * text_score + w_s * source_weight + w_r * veracity + w_g * graph
 
-Signals are normalised per query so vector, text, source and veracity
+Signals are normalised per query so vector, text, source, veracity and graph
 components share a common [0, 1] scale.  This makes the ranking transparent
 and tunable via ``MemoryConfig``.
 """
@@ -55,6 +55,8 @@ class _RecallSignals:
     text_score: float
     source_weight: float
     veracity: float
+    graph_signal: float
+    graph_triples: list[dict]
     confidence: float
     recency: float
     relevance: float
@@ -148,6 +150,151 @@ def _veracity_for_journal(store: MemoryStore, entry: JournalEntry) -> float:
     )
 
 
+def _extract_query_entities(query: str, store: MemoryStore) -> list[tuple[str, str]]:
+    """Extract canonical entity names from the query text.
+
+    Uses the same deterministic extractor that populates the graph during
+    storage, honouring the configured allowlist/blocklist. Each extracted
+    canonical name is resolved against the entity/alias tables (case-
+    insensitively) so that a query mentioning "james" matches a stored entity
+    "James".
+    """
+    from memlife.entity_extractor import extract_entities
+
+    allowlist = getattr(store.config, "entity_extraction_allowlist", None)
+    blocklist = getattr(store.config, "entity_extraction_blocklist", None)
+    raw = extract_entities(query, allowlist=allowlist, blocklist=blocklist)
+    resolved: list[tuple[str, str]] = []
+    for canonical, alias in raw:
+        stored = store.resolve_entity_ci(canonical)
+        if stored:
+            resolved.append((stored, alias))
+        else:
+            resolved.append((canonical, alias))
+    return resolved
+
+
+def _load_linked_sources(
+    store: MemoryStore,
+    source_map: dict[str, list[str]],
+) -> tuple[list[Episode], list[Fact], list[JournalEntry]]:
+    """Fetch source rows referenced by graph triple provenance."""
+    episodes: list[Episode] = []
+    facts: list[Fact] = []
+    journal: list[JournalEntry] = []
+    if "episode" in source_map:
+        episodes = store.episodes_by_ids(source_map["episode"])
+    if "fact" in source_map:
+        facts = store.facts_by_ids(source_map["fact"])
+    if "journal" in source_map:
+        journal = store.journal_by_ids(source_map["journal"])
+    return episodes, facts, journal
+
+
+def _graph_expand(
+    store: MemoryStore,
+    query: str,
+    query_tokens: set[str],
+    config: MemoryConfig,
+) -> list[_RecallSignals]:
+    """Build recall candidates from the entity graph linked to the query.
+
+    Steps:
+      1. Extract entities from the query.
+      2. For each entity, find triples where it appears and collect the
+         source row ids from triple provenance.
+      3. Load those facts/episodes/journal entries and score them with a
+         small graph signal.
+
+    The graph signal is independent of vector/text similarity: a source row
+    linked to a query entity gets a base boost, scaled by the confidence of
+    the linking triple(s) and decayed by recency of the source row.
+    """
+    if not getattr(config, "use_graph_retrieval", False):
+        return []
+
+    decay = {
+        "episode": config.episode_decay_halflife_days,
+        "fact": config.fact_decay_halflife_days,
+        "journal": config.journal_decay_halflife_days,
+    }
+
+    extracted = _extract_query_entities(query, store)
+    if not extracted:
+        return []
+
+    candidates: list[_RecallSignals] = []
+    seen_ids: dict[str, set[str]] = {"episode": set(), "fact": set(), "journal": set()}
+
+    for canonical, _alias in extracted:
+        source_map = store.source_ids_linked_to_entity(
+            canonical, predicate=None, source_kinds={"fact", "episode", "journal"}, limit=100
+        )
+        # Also follow relationship triples from the query entity to related
+        # entities and pull their sources. This lets "projects James works on"
+        # find project-linked rows even if James isn't directly mentioned in them.
+        rel_sources = store.source_ids_linked_via_relationship(
+            canonical, predicate=None, source_kinds={"fact", "episode", "journal"}, limit=100
+        )
+        for kind, ids in rel_sources.items():
+            source_map.setdefault(kind, []).extend(ids)
+
+        eps, facts, journals = _load_linked_sources(store, source_map)
+
+        for ep in eps:
+            if ep.id in seen_ids["episode"]:
+                continue
+            seen_ids["episode"].add(ep.id)
+            text_score = _text_score_for(query_tokens, ep.index_text())
+            source_weight = _SOURCE_WEIGHTS["episode"]
+            conf = 1.0 if ep.is_success else 0.5
+            halflife = _episode_halflife(ep, config)
+            rec = recency_weight(ep.created_at, halflife)
+            c = _candidate(
+                ep, "episode", conf, rec, 0.0, text_score, source_weight, 0.5
+            )
+            c.graph_signal = 1.0
+            candidates.append(c)
+
+        for f in facts:
+            if f.id in seen_ids["fact"]:
+                continue
+            seen_ids["fact"].add(f.id)
+            text_score = _text_score_for(query_tokens, f.content)
+            source_weight = _SOURCE_WEIGHTS.get(f.source, _SOURCE_WEIGHTS["agent"])
+            rec = recency_weight(f.updated_at, decay["fact"])
+            veracity = _veracity_for_fact(store, f)
+            eff_conf = f.effective_confidence(
+                config.fact_decay_halflife_days, config.fact_decay_floor
+            )
+            c = _candidate(
+                f, "fact", eff_conf, rec, 0.0, text_score, source_weight, veracity,
+                fact_id=f.id,
+            )
+            c.graph_signal = 1.0
+            candidates.append(c)
+
+        for j in journals:
+            if j.id in seen_ids["journal"]:
+                continue
+            seen_ids["journal"].add(j.id)
+            text_score = _text_score_for(query_tokens, j.content)
+            source_weight = _SOURCE_WEIGHTS["journal"]
+            eff_conf = j.effective_confidence(
+                config.journal_decay_halflife_days,
+                config.journal_decay_floor,
+            )
+            rec = recency_weight(j.created_at, decay["journal"])
+            veracity = _veracity_for_journal(store, j)
+            c = _candidate(
+                j, "journal", eff_conf, rec, 0.0, text_score, source_weight, veracity
+            )
+            c.graph_signal = 1.0
+            candidates.append(c)
+
+    return candidates
+
+
 async def retrieve(
     store: MemoryStore,
     query: str,
@@ -206,6 +353,14 @@ async def retrieve(
     candidates: list[_RecallSignals] = []
 
     # ------------------------------------------------------------------
+    # Graph expansion (0.6.0)
+    # ------------------------------------------------------------------
+    graph_candidates = _graph_expand(store, query, query_tokens, config)
+    if graph_candidates:
+        counters["graph_candidates"] = counters.get("graph_candidates", 0) + len(graph_candidates)
+        candidates.extend(graph_candidates)
+
+    # ------------------------------------------------------------------
     # Episodes
     # ------------------------------------------------------------------
     episodes: list[Episode] = []
@@ -236,6 +391,10 @@ async def retrieve(
     # Always include 2 most recent episodes for continuity.
     recent = store.recent(limit=2)
     seen_ids = {e.id for e in episodes}
+    # Avoid re-adding episodes that were already pulled via graph expansion.
+    for c in candidates:
+        if c.kind == "episode":
+            seen_ids.add(c.item.id)
     for ep in recent:
         if ep.id not in seen_ids:
             text_score = _text_score_for(query_tokens, ep.index_text())
@@ -259,7 +418,11 @@ async def retrieve(
         facts = []
 
     counters["facts_considered"] += len(facts)
+    seen_fact_ids = {c.item.id for c in candidates if c.kind == "fact"}
     for f in facts:
+        if f.id in seen_fact_ids:
+            continue
+        seen_fact_ids.add(f.id)
         vector_sim = getattr(f, "_vector_sim", 0.0)
         text_score = _text_score_for(query_tokens, f.content)
         source_weight = _source_weight_for(f)
@@ -291,7 +454,11 @@ async def retrieve(
             counters["vector_fallback_to_keyword"] += 1
 
     counters["journal_considered"] += len(notes)
+    seen_journal_ids = {c.item.id for c in candidates if c.kind == "journal"}
     for j in notes:
+        if j.id in seen_journal_ids:
+            continue
+        seen_journal_ids.add(j.id)
         vector_sim = getattr(j, "_vector_sim", 0.0)
         text_score = _text_score_for(query_tokens, j.content)
         source_weight = _source_weight_for(j)
@@ -389,12 +556,17 @@ async def retrieve(
                     "text_score": round(c.text_score, 4),
                     "source_weight": round(c.source_weight, 4),
                     "veracity": round(c.veracity, 4),
+                    "graph_signal": round(c.graph_signal, 4),
                     "confidence": round(c.confidence, 4),
                     "recency": round(c.recency, 4),
                     "relevance": round(c.relevance, 4),
                     "score": round(c.score, 4),
                     "annotations": getattr(c.item, "annotations", []),
                     "links": getattr(c.item, "links", []),
+                    "graph_triples": [
+                        {"subject": t["subject"], "predicate": t["predicate"], "object": t["object"]}
+                        for t in c.graph_triples
+                    ],
                     "why": c.why,
                     "text": c.labelled_text,
                 }
@@ -432,6 +604,9 @@ def _why_candidate(c: _RecallSignals, config: MemoryConfig) -> str:
         parts.append("well supported")
     elif c.veracity <= 0.35 and config.recall_veracity_weight > 0:
         parts.append("weakly supported")
+
+    if c.graph_signal >= 0.5 and getattr(config, "use_graph_retrieval", False):
+        parts.append("graph linked")
 
     if not parts:
         return "selected by blend"
@@ -490,6 +665,8 @@ def _candidate(
         text_score=text_score,
         source_weight=source_weight,
         veracity=veracity,
+        graph_signal=0.0,
+        graph_triples=[],
         confidence=confidence,
         recency=recency,
         relevance=0.0,
@@ -506,22 +683,25 @@ def _blend_candidates(candidates: list[_RecallSignals], config: MemoryConfig) ->
     text_scores = [c.text_score for c in candidates]
     source_weights = [c.source_weight for c in candidates]
     veracities = [c.veracity for c in candidates]
+    graph_signals = [c.graph_signal for c in candidates]
 
     norm_vector = _normalize_signal(vector_sims)
     norm_text = _normalize_signal(text_scores)
     norm_source = _normalize_signal(source_weights)
     norm_veracity = _normalize_signal(veracities)
+    norm_graph = _normalize_signal(graph_signals)
 
     w_v = config.recall_vector_weight
     w_t = config.recall_text_weight
     w_s = config.recall_source_weight
     w_r = config.recall_veracity_weight
-    total = w_v + w_t + w_s + w_r
+    w_g = getattr(config, "graph_retrieval_weight", 0.0) if getattr(config, "use_graph_retrieval", False) else 0.0
+    total = w_v + w_t + w_s + w_r + w_g
     if total < 1e-9:
         total = 1.0
 
-    for c, nv, nt, ns, nr in zip(candidates, norm_vector, norm_text, norm_source, norm_veracity):
-        c.relevance = (w_v * nv + w_t * nt + w_s * ns + w_r * nr) / total
+    for c, nv, nt, ns, nr, ng in zip(candidates, norm_vector, norm_text, norm_source, norm_veracity, norm_graph):
+        c.relevance = (w_v * nv + w_t * nt + w_s * ns + w_r * nr + w_g * ng) / total
         c.score = c.relevance * c.confidence * c.recency
 
 

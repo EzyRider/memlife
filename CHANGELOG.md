@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-18
+
+### Added
+
+- **Embedding cache** — content-addressable cache keyed on
+  `(model_name, sha256(text))` storing canonical JSON float vectors.
+  Cache read/write is transparently wrapped into `embed_texts()` so only
+  misses hit the embedder. Controlled by `MemoryConfig.embedding_cache_enabled`
+  and `embedding_cache_max_mb` with env overrides
+  `MEMLIFE_EMBEDDING_CACHE_ENABLED` / `MEMLIFE_EMBEDDING_CACHE_MAX_MB`.
+  GC enforces an LRU size cap and removes unreferenced rows.
+- **Automatic entity extraction** — deterministic, zero-LLM extraction of
+  proper-noun-like phrases, allowlist terms, and short acronyms from facts,
+  episodes, and journal entries. Opt-in via
+  `MemoryConfig.auto_entity_extraction`; mention triples are created when
+  `auto_entity_mentions` is true. Tuned with `auto_entity_confidence`,
+  `entity_extraction_allowlist`, and `entity_extraction_blocklist`.
+- **Graph-integrated retrieval** — `retrieve()` can now boost candidates that
+  are linked to entities mentioned in the query. Enabled with
+  `MemoryConfig.use_graph_retrieval`; weight controlled by
+  `graph_retrieval_weight`. The graph signal follows `mentions` triples and
+  one-hop relationship triples, scaled by triple confidence and source
+  recency. Debug output exposes `graph_signal` and the expanding triples.
+
+### Changed
+
+- `retrieve()` candidates now include `graph_signal`, `triples`, and a
+  `why` explanation when debug mode is enabled.
+- `_facts.py`, `_journal.py`, and `_triples.py` updated to record entity
+  provenance and expose relationship-based source lookup.
+
 ## [0.5.5] - 2026-07-17
 
 ### Fixed

@@ -12,7 +12,8 @@ def _fact(id: str, content: str, score: float) -> _RecallSignals:
     return _RecallSignals(
         item=f, kind="fact", labelled_text=content, dedup_text=content,
         fact_id=id, vector_sim=0.0, text_score=0.0, source_weight=0.9,
-        veracity=0.5, confidence=0.8, recency=1.0, relevance=0.5,
+        veracity=0.5, graph_signal=0.0, graph_triples=[],
+        confidence=0.8, recency=1.0, relevance=0.5,
         score=score,
     )
 

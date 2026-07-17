@@ -316,6 +316,67 @@ class TripleMixin:
             for r in rows
         ]
 
+    def source_ids_linked_to_entity(
+        self,
+        entity: str,
+        predicate: str | None = None,
+        source_kinds: set[str] | None = None,
+        limit: int = 100,
+    ) -> dict[str, list[str]]:
+        """Return source row ids that mention ``entity`` via triple provenance.
+
+        Looks up triples where ``entity`` appears as subject or object, then
+        returns the provenance source ids grouped by source kind. Only
+        provenance entries whose kind is in ``source_kinds`` are returned.
+        """
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
+        source_kinds = source_kinds or {"fact", "episode", "journal"}
+        triples = self.triples_about(canonical, predicate=predicate, limit=limit)
+        result: dict[str, list[str]] = {}
+        for t in triples:
+            for prov in t.get("provenance", []):
+                kind = prov.get("kind", "").lower()
+                sid = prov.get("id", "").strip()
+                if kind in source_kinds and sid:
+                    result.setdefault(kind, []).append(sid)
+        return result
+
+    def source_ids_linked_via_relationship(
+        self,
+        entity: str,
+        predicate: str | None = None,
+        source_kinds: set[str] | None = None,
+        limit: int = 100,
+    ) -> dict[str, list[str]]:
+        """Return source row ids linked to ``entity`` through relationship triples.
+
+        Unlike ``source_ids_linked_to_entity`` (which uses provenance on
+        mention triples), this method treats relationship triples themselves as
+        edges. For each triple where ``entity`` is the subject, the object is
+        treated as a related entity; we then collect source rows linked to that
+        related entity via mention triple provenance. This lets a query about
+        ``James`` surface rows that mention ``memlife`` when the graph knows
+        ``James works_on memlife``.
+        """
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
+        source_kinds = source_kinds or {"fact", "episode", "journal"}
+        result: dict[str, list[str]] = {}
+        # Outgoing relationship triples from the entity (subject == entity).
+        rows = self.conn.execute(
+            "SELECT id, object FROM temporal_triples WHERE subject = ? "
+            "AND predicate != 'mentions' "
+            + ("AND predicate = ? " if predicate else "")
+            + "ORDER BY created_at DESC LIMIT ?",
+            (canonical,) + ((predicate.strip(),) if predicate else ()) + (limit,),
+        ).fetchall()
+        for triple_id, obj in rows:
+            source_map = self.source_ids_linked_to_entity(
+                obj, predicate="mentions", source_kinds=source_kinds, limit=limit
+            )
+            for kind, ids in source_map.items():
+                result.setdefault(kind, []).extend(ids)
+        return result
+
     def triples_to(
         self, entity: str, predicate: str | None = None, limit: int = 20,
     ) -> list[dict]:
@@ -431,6 +492,29 @@ class TripleMixin:
         row = self.conn.execute(
             "SELECT canonical_name FROM entity_aliases WHERE alias = ?",
             (name,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def resolve_entity_ci(self, name: str) -> str | None:
+        """Case-insensitive entity resolution.
+
+        First tries exact match, then falls back to a case-insensitive lookup
+        on canonical names and aliases. This is used by graph retrieval so a
+        query mentioning "james" can follow triples stored for "James".
+        """
+        exact = self.resolve_entity(name)
+        if exact:
+            return exact
+        lower = name.strip().lower()
+        row = self.conn.execute(
+            "SELECT canonical_name FROM entities WHERE lower(canonical_name) = ?",
+            (lower,),
+        ).fetchone()
+        if row:
+            return row[0]
+        row = self.conn.execute(
+            "SELECT canonical_name FROM entity_aliases WHERE lower(alias) = ?",
+            (lower,),
         ).fetchone()
         return row[0] if row else None
 

@@ -536,6 +536,21 @@ class JournalStore:
         ).fetchall()
         return [self._journal_from_row(r) for r in rows]
 
+    def journal_by_ids(self, ids: list[str]) -> list[JournalEntry]:
+        """Fetch specific journal entries by id (preserving no particular order)."""
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            f"SELECT id, type, content, confidence, source_episodes_json, "
+            f"private, created_at, superseded_by, embedding_json, last_detected, "
+            f"annotations_json, links_json FROM journal "
+            f"WHERE id IN ({placeholders})",
+            tuple(ids),
+        ).fetchall()
+        by_id = {r[0]: self._journal_from_row(r) for r in rows}
+        return [by_id[i] for i in ids if i in by_id]
+
     def _journal_from_row(self, r) -> JournalEntry:
         return JournalEntry(
             id=r[0], type=r[1], content=r[2], confidence=r[3],

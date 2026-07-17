@@ -130,6 +130,13 @@ class MemoryConfig:
     entity_extraction_allowlist: set[str] | frozenset[str] | None = None
     entity_extraction_blocklist: set[str] | frozenset[str] | None = None
 
+    # Graph-integrated retrieval (0.6.0).  When enabled, retrieve() extracts
+    # entities from the query, follows mention/relationship triples, and adds
+    # linked facts/episodes/journal entries into the candidate pool. The graph
+    # signal is blended with the normal relevance score.
+    use_graph_retrieval: bool = False
+    graph_retrieval_weight: float = 0.15
+
     # Optional infrastructure backends (MV2-I001..I004).  All default off.
     use_sqlite_vec: bool = False
     use_binary_vectors: bool = False
@@ -302,4 +309,6 @@ class MemoryConfig:
             auto_entity_extraction=_bool("MEMLIFE_AUTO_ENTITY_EXTRACTION", False),
             auto_entity_mentions=_bool("MEMLIFE_AUTO_ENTITY_MENTIONS", True),
             auto_entity_confidence=float(os.getenv("MEMLIFE_AUTO_ENTITY_CONFIDENCE", "0.6")),
+            use_graph_retrieval=_bool("MEMLIFE_USE_GRAPH_RETRIEVAL", False),
+            graph_retrieval_weight=float(os.getenv("MEMLIFE_GRAPH_RETRIEVAL_WEIGHT", "0.15")),
         )
