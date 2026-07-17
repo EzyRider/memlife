@@ -43,7 +43,7 @@ from memlife._facts import FactStore
 from memlife._journal import JournalStore
 from memlife.protocols import Embedder
 from memlife.config import MemoryConfig
-from memlife.namespace import validate_namespace, list_namespaces
+from memlife.namespace import validate_namespace, list_namespaces, warn_if_cloud_sync_path
 from memlife.vector_backends import create_vector_backend
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         config.validate()
         self.db_path = config.db_path or self._resolve_db_path(config)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        warn_if_cloud_sync_path(Path(self.db_path).parent)
         self.embedder = embedder
         self.config = config
         self._init_store_attrs(config)

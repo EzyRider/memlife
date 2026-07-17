@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.5.4**
+**Current version: 0.5.5**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -191,9 +191,9 @@ config = MemoryConfig(
     db_path="./memlife.db",
     embedding_model="dummy",          # or "nomic-embed-text", etc.
     vector_backend="json",              # json | binary | sqlite_vec
-    reflection_interval=3600,           # seconds
-    decay_half_life_days=30,
-    confidence_floor=0.3,
+    reflection_timeout=120.0,             # per-LLM-call timeout during reflection
+    journal_decay_halflife_days=30.0,
+    journal_decay_floor=0.15,
     namespace="default",
 )
 ```
@@ -208,7 +208,48 @@ memlife ships with an MCP server so any MCP-compatible client can use it:
 memlife-mcp-server --db-path ./memlife.db --vector-backend binary
 ```
 
-Tools exposed include `memory_store`, `memory_search`, `memory_retrieve`, `memory_reflect`, `memory_contradictions`, `memory_revise`, `memory_expire`, `memory_recall`, and more.
+Tools exposed include `memory_store`, `memory_search`, `memory_search_journal`, `memory_search_episodes`, `memory_retrieve`, `memory_revise`, `memory_expire`, `memory_reflect`, `memory_gc`, `memory_vacuum`, `memory_store_triple`, `memory_search_triples`, and `memory_entity_neighbors`.
+
+Resources include `memlife://stats`, `memlife://health`, and `memlife://contradictions`.
+>
+> **Note: PyPI vs GitHub `main`** — The `--log-tool-calls` flag ships in the
+> current PyPI release (0.5.5 and later). If you are still on 0.5.4, omit
+> `--log-tool-calls` from your MCP server command.
+>
+> **Windows / cloud-sync caveat:** Do not point `data_dir` at a OneDrive,
+> Dropbox, Google Drive, iCloud, or other cloud-sync folder, or at a network
+> share. SQLite WAL mode keeps `-wal` and `-shm` sidecar files next to the
+> database that are constantly rewritten; sync clients and real-time antivirus
+> scanners can lock or corrupt those files, causing "database is locked" or
+> checksum errors. Use a local, non-synced directory. If you still see locking
+> errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
+> disable WAL mode.
+
+## What's new in 0.5.5
+
+- **Version consistency.** `memlife.__version__` now matches `pyproject.toml`
+  (0.5.5).
+- **README accuracy.** The MCP server tool list now lists only implemented
+  tools and clarifies that `memlife://contradictions` is a resource, not a tool.
+  The `MemoryConfig` example now uses real fields (`reflection_timeout`,
+  `journal_decay_halflife_days`, `journal_decay_floor`).
+- **Bounded tool-call logging cache.** The in-memory dedup dict used by
+  `--log-tool-calls` is capped so long-running MCP servers cannot grow it
+  without bound.
+- **Idempotent MCP shutdown.** `shutdown_mcp_server()` now guards against
+  double runs so SIGTERM and `atexit` cannot both attempt cleanup.
+- **Windows namespace case-collision hardening.** `list_namespaces()` now
+  normalizes directory names to lowercase and warns/ignores mixed-case
+  duplicates, preventing two directories that resolve to the same database from
+  appearing as separate namespaces on case-insensitive filesystems.
+- **Cloud-sync path warning.** memlife now logs a warning when `data_dir`
+  resolves under a known cloud-sync folder (OneDrive, Dropbox, Google Drive,
+  iCloud, etc.) because sync clients can lock or corrupt SQLite WAL sidecar
+  files.
+- **Windows sqlite-vec fallback verified.** The store already falls back from
+  `sqlite_vec` to `json` gracefully when extension loading is unavailable. On
+  Windows, where `pysqlite3-binary` is not installed, this fallback uses the
+  stdlib `sqlite3` module and continues to work.
 
 ## What's new in 0.5.4
 

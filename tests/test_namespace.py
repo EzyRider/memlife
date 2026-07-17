@@ -12,6 +12,7 @@ from memlife import (
     list_namespaces,
     validate_namespace,
 )
+from memlife.namespace import warn_if_cloud_sync_path
 
 
 def test_valid_namespace():
@@ -62,6 +63,37 @@ def test_list_namespaces(tmp_path):
 def test_list_namespaces_missing_dir(tmp_path):
     missing = tmp_path / "does_not_exist"
     assert list_namespaces(missing) == []
+
+
+def test_list_namespaces_case_collision(tmp_path, caplog):
+    """Mixed-case directories that map to the same namespace are deduped."""
+    (tmp_path / "Ingrid").mkdir()
+    (tmp_path / "ingrid").mkdir()
+    with caplog.at_level("WARNING", logger="memlife.namespace"):
+        result = list_namespaces(tmp_path)
+    assert result == ["ingrid"]
+    assert any("mixed-case namespace directory" in r.message for r in caplog.records)
+
+
+def test_warn_if_cloud_sync_path(tmp_path, caplog):
+    """A data_dir under a known cloud-sync folder triggers a warning."""
+    sync_root = tmp_path / "OneDrive" / "Documents"
+    sync_root.mkdir(parents=True)
+    with caplog.at_level("WARNING", logger="memlife.namespace"):
+        warn_if_cloud_sync_path(sync_root)
+    assert any("cloud-sync folder" in r.message for r in caplog.records)
+
+
+def test_cloud_sync_warning_on_store_init(tmp_path, caplog):
+    """MemoryStore warns when data_dir resolves under a cloud-sync folder."""
+    data_dir = tmp_path / "Dropbox" / "memlife"
+    data_dir.mkdir(parents=True)
+    with caplog.at_level("WARNING", logger="memlife.namespace"):
+        store = MemoryStore(config=MemoryConfig(data_dir=str(data_dir)))
+    try:
+        assert any("cloud-sync folder" in r.message for r in caplog.records)
+    finally:
+        store.close()
 
 
 def test_switch_namespace(tmp_path):

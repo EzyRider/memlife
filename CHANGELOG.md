@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-07-17
+
+### Fixed
+
+- `memlife.__version__` now matches `pyproject.toml` (0.5.5); previously it was
+  still reporting 0.5.3 after the 0.5.4 release.
+- README MCP server tool list now lists only implemented tools and clarifies
+  that `memlife://contradictions` is a resource, not a tool. The `MemoryConfig`
+  example snippet now uses real fields (`reflection_timeout`,
+  `journal_decay_halflife_days`, `journal_decay_floor`).
+- `shutdown_mcp_server()` is now idempotent: a sentinel prevents SIGTERM and
+  `atexit` from both attempting cleanup and closing resources twice.
+- `list_namespaces()` normalizes directory names to lowercase and warns/ignores
+  mixed-case duplicates, preventing case-insensitive filesystems (Windows,
+  macOS) from presenting two directories as separate namespaces when they share
+  one database file.
+
+### Added
+
+- Advisory warning when `data_dir` resolves under a known cloud-sync folder
+  (OneDrive, Dropbox, Google Drive, iCloud, Box, Nextcloud, ownCloud,
+  Syncthing). SQLite WAL sidecar files are constantly rewritten and can be
+  locked or corrupted by sync clients and real-time antivirus scanners.
+- The in-memory tool-call dedup cache (`--log-tool-calls`) is capped at 1000
+  entries so long-running MCP servers cannot grow it without bound.
+
+### Changed
+
+- `import time` in `memlife.mcp_server` moved to module level (code hygiene).
+
 ## [0.5.4] - 2026-07-11
 
 ### Added

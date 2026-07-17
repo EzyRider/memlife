@@ -36,11 +36,17 @@ import logging
 import os
 import signal
 import sys
+import time
 
 from memlife.config import MemoryConfig
 from memlife.store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+# Cap the in-memory dedup cache for tool-call episode logging so long-running
+# MCP servers do not grow this dict without bound. 1000 keys is plenty for a
+# 60-second dedup window and keeps memory predictable.
+_LOGGED_TOOL_CALLS_MAX_SIZE = 1000
 
 
 def _make_embedder(embedder_type: str, model: str, base_url: str):
@@ -144,6 +150,9 @@ def create_server(
         return _reflector
 
     mcp = FastMCP("memlife")
+    # Expose the dedup dict for introspection/tests; _log_tool_call mutates
+    # the same dict object via closure.
+    mcp._logged_tool_calls = _logged_tool_calls
 
     # ── Tools ──────────────────────────────────────────────────────
 
@@ -154,12 +163,16 @@ def create_server(
         if not log_tool_calls:
             return
         try:
-            import time
             key = (tool_name, outcome)
             now = time.time()
             last = _logged_tool_calls.get(key)
             if last and outcome == "success" and (now - last) < 60:
                 return
+            # Bound the dedup cache so it cannot grow unbounded on a long-running
+            # server. Evict oldest entries (insertion order) until there is room
+            # for the new key. 1000 keys * ~64 bytes each is negligible.
+            while len(_logged_tool_calls) >= _LOGGED_TOOL_CALLS_MAX_SIZE:
+                _logged_tool_calls.pop(next(iter(_logged_tool_calls)))
             _logged_tool_calls[key] = now
             store.remember(
                 task=f"Tool call: {tool_name}",
@@ -543,6 +556,12 @@ def shutdown_mcp_server(mcp) -> None:
     Safe to call multiple times. Closes the store, embedder, chat adapter,
     and reflector (if any were created).
     """
+    # Use a sentinel to ensure a single shutdown pass, even if SIGTERM and
+    # atexit both fire.
+    if getattr(mcp, "_memlife_shutdown_done", False):
+        return
+    mcp._memlife_shutdown_done = True
+
     store = getattr(mcp, "_memlife_store", None)
     embedder = getattr(mcp, "_memlife_embedder", None)
     chat = getattr(mcp, "_memlife_chat_adapter", None)

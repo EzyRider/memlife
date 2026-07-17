@@ -272,7 +272,55 @@ def test_shutdown_mcp_server_idempotent(server):
     """shutdown_mcp_server can be called twice without error."""
     from memlife.mcp_server import shutdown_mcp_server
     shutdown_mcp_server(server)
+    assert getattr(server, "_memlife_shutdown_done", False) is True
     shutdown_mcp_server(server)  # should not raise
+
+
+def test_shutdown_mcp_server_sets_sentinel(server):
+    """shutdown_mcp_server sets the done sentinel and skips second pass."""
+    from memlife.mcp_server import shutdown_mcp_server
+    assert getattr(server, "_memlife_shutdown_done", False) is False
+    shutdown_mcp_server(server)
+    assert server._memlife_shutdown_done is True
+    # Close resources are already gone; second call is a no-op.
+    shutdown_mcp_server(server)
+
+
+@pytest.mark.asyncio
+async def test_tool_call_log_cache_is_capped(tmp_path):
+    """The _logged_tool_calls dedup dict cannot grow without bound."""
+    from memlife.mcp_server import _LOGGED_TOOL_CALLS_MAX_SIZE
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_cap.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        log_tool_calls=True,
+    )
+    manager = mcp._tool_manager
+    fn = manager._tools.get("memory_store") if hasattr(manager, '_tools') else None
+    if fn is not None:
+        # Force enough unique (tool_name, outcome) keys to trigger eviction.
+        # outcome is always "success" from the happy path, so the key is
+        # ("memory_store", "success") and we won't grow it that way. Instead,
+        # call _log_tool_call indirectly via multiple distinct tools with
+        # distinct outcomes by exercising both memory_store and memory_revise.
+        await fn.fn(content="cap test", source="agent", confidence=0.7)
+        # The dict size after one success should be 1.
+        logged = mcp._logged_tool_calls
+        assert logged is not None
+        # Manually fill the dict to verify the cap behaviour.
+        for i in range(_LOGGED_TOOL_CALLS_MAX_SIZE + 5):
+            logged[("tool", f"outcome_{i}")] = float(i)
+        assert len(logged) > _LOGGED_TOOL_CALLS_MAX_SIZE
+        # Trigger the cap via _log_tool_call by injecting a fresh key.
+        # memory_store_triple calls _log_tool_call("memory_store_triple", "success", ...).
+        triple_fn = manager._tools.get("memory_store_triple")
+        if triple_fn is not None:
+            # The dict was already over the cap before this call; the next write
+            # should evict down to the cap.
+            triple_fn.fn("subject", "pred", "object", confidence=0.7)
+            assert len(logged) <= _LOGGED_TOOL_CALLS_MAX_SIZE
+    mcp._memlife_store.close()
 
 
 def test_create_server_embedder_is_dummy(server):

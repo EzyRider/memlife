@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memlife"
-version = "0.5.4"
+version = "0.5.5"
 description = "Memory that degrades gracefully — four-tier lifecycle memory for AI agents"
 readme = "README.md"
 license = {text = "MIT"}
