@@ -44,12 +44,12 @@ class TripleMixin:
         """
         now = time.time()
         triple_id = f"triple_{uuid.uuid4().hex[:12]}"
-        subj = self.resolve_entity(subject.strip()) or subject.strip()
-        obj = self.resolve_entity(object.strip()) or object.strip()
+        subj = self.resolve_entity_ci(subject.strip()) or subject.strip()
+        obj = self.resolve_entity_ci(object.strip()) or object.strip()
         pred = predicate.strip()
 
-        self._ensure_entity(subj)
-        self._ensure_entity(obj)
+        subj = self._ensure_entity(subj)
+        obj = self._ensure_entity(obj)
 
         self.conn.execute(
             "INSERT INTO temporal_triples "
@@ -113,8 +113,8 @@ class TripleMixin:
         """
         now = time.time()
         triple_id = f"triple_{uuid.uuid4().hex[:12]}"
-        canonical = self.resolve_entity(entity.strip()) or entity.strip()
-        self._ensure_entity(canonical)
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
+        canonical = self._ensure_entity(canonical)
         self.conn.execute(
             "INSERT INTO temporal_triples "
             "(id, subject, predicate, object, valid_from, valid_until, "
@@ -151,7 +151,7 @@ class TripleMixin:
         for canonical, alias in extract_entities(
             text, allowlist=allowlist, blocklist=blocklist
         ):
-            self._ensure_entity(canonical)
+            canonical = self._ensure_entity(canonical)
             # Store an alias if the original casing differs from the canonical.
             if alias and alias != canonical:
                 self.add_entity_alias(canonical, alias)
@@ -367,30 +367,62 @@ class TripleMixin:
     ) -> dict[str, list[tuple[str, dict]]]:
         """Return source rows linked to ``entity`` through relationship triples.
 
-        For each currently-valid outgoing relationship triple from ``entity``,
-        the object is treated as a related entity and its mention-triple
-        provenance is collected along with the full mention triple record.
+        Follows both outgoing (entity as subject) and incoming (entity as
+        object) currently-valid relationship edges, treats the neighbour on
+        each edge as a related entity, and collects mention-triple provenance
+        for those neighbours.  Mention triples are fetched in a single batched
+        query rather than one round-trip per neighbour.
         """
         canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
         source_kinds = source_kinds or {"fact", "episode", "journal"}
         result: dict[str, list[tuple[str, dict]]] = {}
-        # Outgoing relationship triples from the entity (subject == entity).
-        sql = (
-            "SELECT id, object FROM temporal_triples WHERE subject = ? "
-            "AND predicate != 'mentions' AND valid_until IS NULL "
+
+        # Relationship edges in both directions (entity as subject or object).
+        rel_sql = (
+            "SELECT id, subject, object FROM temporal_triples "
+            "WHERE (subject = ? OR object = ?) AND predicate != 'mentions' "
+            "AND valid_until IS NULL "
         )
-        params: list = [canonical]
+        rel_params: list = [canonical, canonical]
         if predicate:
-            sql += "AND predicate = ? "
-            params.append(predicate.strip())
-        sql += "ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-        rows = self.conn.execute(sql, params).fetchall()
-        for _triple_id, obj in rows:
-            for kind, entries in self.source_scores_linked_to_entity(
-                obj, predicate="mentions", source_kinds=source_kinds, limit=limit
-            ).items():
-                result.setdefault(kind, []).extend(entries)
+            rel_sql += "AND predicate = ? "
+            rel_params.append(predicate.strip())
+        rel_sql += "ORDER BY created_at DESC LIMIT ?"
+        rel_params.append(limit)
+        rel_rows = self.conn.execute(rel_sql, rel_params).fetchall()
+
+        related: set[str] = set()
+        for _rid, subj, obj in rel_rows:
+            related.add(obj if subj == canonical else subj)
+        if not related:
+            return result
+
+        # Batch fetch currently-valid mention triples for all neighbours.
+        placeholders = ",".join("?" * len(related))
+        mention_sql = (
+            "SELECT id, subject, predicate, object, valid_from, valid_until, "
+            "confidence, created_at FROM temporal_triples "
+            f"WHERE predicate = 'mentions' AND object IN ({placeholders}) "
+            "AND valid_until IS NULL "
+            "ORDER BY created_at DESC LIMIT ?"
+        )
+        mention_params = list(related) + [limit * len(related)]
+        mention_rows = self.conn.execute(mention_sql, mention_params).fetchall()
+        mention_ids = [r[0] for r in mention_rows]
+        prov = self._triples_with_provenance(mention_ids)
+
+        for r in mention_rows:
+            t = {
+                "id": r[0], "subject": r[1], "predicate": r[2], "object": r[3],
+                "valid_from": r[4], "valid_until": r[5], "confidence": r[6],
+                "created_at": r[7],
+                "provenance": prov.get(r[0], []),
+            }
+            for p in t.get("provenance", []):
+                kind = p.get("kind", "").lower()
+                sid = p.get("id", "").strip()
+                if kind in source_kinds and sid and t.get("id"):
+                    result.setdefault(kind, []).append((sid, t))
         return result
 
     def source_ids_linked_via_relationship(
@@ -491,7 +523,7 @@ class TripleMixin:
         alias = alias.strip()
         if not canonical or not alias or alias == canonical:
             return False
-        self._ensure_entity(canonical)
+        canonical = self._ensure_entity(canonical)
         # Update JSON aliases list on the entity row.
         row = self.conn.execute(
             "SELECT aliases_json FROM entities WHERE canonical_name = ?",
@@ -549,14 +581,22 @@ class TripleMixin:
         ).fetchone()
         return row[0] if row else None
 
-    def _ensure_entity(self, name: str) -> None:
-        """Ensure ``name`` exists as a canonical entity."""
+    def _ensure_entity(self, name: str) -> str:
+        """Ensure ``name`` exists as a canonical entity.
+
+        Resolves case-insensitively first so manual triples (e.g. ``James``)
+        reuse an auto-extracted canonical (e.g. ``james``) instead of creating
+        a case-variant duplicate.  Returns the canonical name that is actually
+        stored.
+        """
         now = time.time()
+        canonical = self.resolve_entity_ci(name.strip()) or name.strip()
         self.conn.execute(
             "INSERT OR IGNORE INTO entities (canonical_name, aliases_json, created_at) "
             "VALUES (?, '[]', ?)",
-            (name, now),
+            (canonical, now),
         )
+        return canonical
 
     def _add_triple_provenance(
         self, triple_id: str, provenance: list[dict],

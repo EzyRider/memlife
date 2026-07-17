@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-18
+
+### Fixed
+
+- Graph relationship traversal now follows **incoming** edges as well as
+  outgoing edges, so querying an entity that appears as the object of a
+  relationship (e.g. "Bob" in "Alice knows Bob") discovers related sources.
+- Entity canonicalisation is now case-insensitive when creating or ensuring
+  entities. Manual `store_triple("James", ...)` reuses an auto-extracted
+  canonical entity "james" instead of creating a duplicate "James" node.
+- `SyncMemoryStore.retrieve()` and `MemoryStore.retrieve()` now accept a
+  `debug=True` flag and return the structured debug dict.
+- `SyncMemoryStore.store_mention_triple()` added for parity with the async
+  `MemoryStore` API.
+
+### Added
+
+- Regression test suite for graph-integrated retrieval
+  (`tests/test_graph_retrieval.py`) covering mention-triple boosts,
+  outgoing/incoming relationship hops, superseded-fact filtering,
+  closed-relationship filtering, case canonicalisation, and debug output.
+
 ## [0.6.1] - 2026-07-18
 
 ### Fixed

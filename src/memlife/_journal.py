@@ -339,7 +339,9 @@ class JournalStore:
         scored.sort(key=lambda t: t[0], reverse=True)
         return [j for _, j in scored[:limit]]
 
-    async def retrieve(self, query: str, config: MemoryConfig | None = None) -> str:
+    async def retrieve(
+        self, query: str, config: MemoryConfig | None = None, *, debug: bool = False
+    ) -> str | dict:
         """Retrieve and rank memories across all layers.
 
         This is the canonical retrieval method. Delegates to
@@ -347,7 +349,7 @@ class JournalStore:
         falls back to ``self.config``.
         """
         from memlife.retrieval import retrieve as _retrieve
-        return await _retrieve(self, query, config or self.config)
+        return await _retrieve(self, query, config or self.config, debug=debug)
 
     def supersede_journal(self, target_id: str, by_id: str) -> bool:
         """Mark a prior journal entry superseded by a new one (closes the loop).

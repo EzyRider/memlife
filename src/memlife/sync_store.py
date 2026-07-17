@@ -157,8 +157,10 @@ class SyncMemoryStore:
                      query_vector: list[float] | None = None):
         return self._run(self._store.recall_facts(query, limit, query_vector))
 
-    def retrieve(self, query: str, config: MemoryConfig | None = None) -> str:
-        return self._run(self._store.retrieve(query, config))
+    def retrieve(
+        self, query: str, config: MemoryConfig | None = None, *, debug: bool = False
+    ) -> str | dict:
+        return self._run(self._store.retrieve(query, config, debug=debug))
 
     def embed_episode(self, ep_id: str) -> None:
         return self._run(self._store.embed_episode(ep_id))
@@ -179,6 +181,13 @@ class SyncMemoryStore:
     def store_triple(self, subject: str, predicate: str, object: str,
                      confidence: float = 0.8) -> str:
         return self._store.store_triple(subject, predicate, object, confidence=confidence)
+
+    def store_mention_triple(
+        self, source_kind: str, source_id: str, entity: str, confidence: float = 0.6
+    ) -> str:
+        return self._store.store_mention_triple(
+            source_kind, source_id, entity, confidence=confidence
+        )
 
     def triples_about(self, entity: str, predicate: str | None = None, limit: int = 20):
         return self._store.triples_about(entity, predicate=predicate, limit=limit)
