@@ -198,6 +198,10 @@ class Metrics:
     # Recall diagnostics
     recall: dict = field(default_factory=dict)
 
+    # Embedding cache (0.6.0)
+    embedding_cache_entries: int = 0
+    embedding_cache_bytes: int = 0
+
     # Schema migration health
     migration: dict = field(default_factory=dict)
 

@@ -133,6 +133,11 @@ class MemoryConfig:
     # "sqlite_vec", "sqlite-vec") take precedence over the legacy flags.
     vector_backend: str | None = None
 
+    # Embedding cache (0.6.0).  Content-addressable cache keyed on
+    # (model_name, sha256(text)) so repeated text and model swaps are cheap.
+    embedding_cache_enabled: bool = True
+    embedding_cache_max_mb: int = 512
+
     def validate(self) -> None:
         """Fail fast on configuration that would break store init.
 
@@ -181,6 +186,11 @@ class MemoryConfig:
             raise ValueError("fact_merge_threshold must be in [0, 1]")
         if not (0 <= self.fact_conflict_threshold <= 1):
             raise ValueError("fact_conflict_threshold must be in [0, 1]")
+
+        # Embedding cache size must be non-negative.  0 disables the size cap
+        # (lifecycle GC still runs).
+        if self.embedding_cache_max_mb < 0:
+            raise ValueError("embedding_cache_max_mb must be >= 0")
 
     def resolved_vector_backend(self) -> str:
         """Return the effective vector backend name.
@@ -278,4 +288,6 @@ class MemoryConfig:
             use_polyphonic_recall=_bool("MEMLIFE_USE_POLYPHONIC_RECALL", False),
             memorias_extraction=_bool("MEMLIFE_MEMORIAS_EXTRACTION", False),
             vector_backend=os.getenv("MEMLIFE_VECTOR_BACKEND", None),
+            embedding_cache_enabled=_bool("MEMLIFE_EMBEDDING_CACHE_ENABLED", True),
+            embedding_cache_max_mb=int(os.getenv("MEMLIFE_EMBEDDING_CACHE_MAX_MB", "512")),
         )

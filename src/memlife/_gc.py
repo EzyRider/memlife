@@ -297,6 +297,32 @@ class GCMixin:
         )
         pruned["orphan_entities"] = cur.rowcount
 
+        # 0.6.0: prune embedding cache rows that are no longer referenced by
+        # any fact, journal entry, or episode under their model+text hash.
+        # A cache row is referenced if there exists a row in facts/journal/
+        # episodes whose embedding_model matches the cache model_name and whose
+        # content hash equals the cache text_hash.  We compute the content hash
+        # in Python once per source row and compare it to c.text_hash so the
+        # database does not need a hash function.
+        pruned["embedding_cache_unreferenced"] = self._prune_unreferenced_embedding_cache()
+
+        # 0.6.0: enforce embedding_cache_max_mb LRU cap.  We approximate size
+        # by the JSON byte length; this is good enough for lifecycle governance.
+        max_mb = getattr(self.config, "embedding_cache_max_mb", 512)
+        if max_mb > 0:
+            max_bytes = max_mb * 1024 * 1024
+            cur = self.conn.execute(
+                "DELETE FROM embedding_cache WHERE cache_key IN ("
+                "  SELECT cache_key FROM ("
+                "    SELECT cache_key, SUM(LENGTH(vector_json)) OVER "
+                "      (ORDER BY last_used_at DESC, created_at DESC) AS running_bytes"
+                "    FROM embedding_cache"
+                "  ) WHERE running_bytes > ?"
+                ")",
+                (max_bytes,),
+            )
+            pruned["embedding_cache_evicted_lru"] = cur.rowcount
+
         self.conn.commit()
 
         # MF-006: VACUUM is now a separate method — it needs an exclusive
@@ -307,6 +333,65 @@ class GCMixin:
             if isinstance(v, int) and k not in ("db_size_before_mb", "db_size_after_mb")
         )
         return pruned
+
+    def _prune_unreferenced_embedding_cache(self) -> int:
+        """Delete embedding_cache rows no longer referenced by any fact, journal,
+        or episode under the same (model_name, text_hash) pair.
+
+        Returns the number of rows deleted.
+        """
+        import hashlib
+
+        # Build the set of referenced (model_name, text_hash) pairs from the
+        # three tables that store embeddings.  Contradictions are excluded
+        # because they are never embedded (MF-005).
+        referenced: set[tuple[str, str]] = set()
+        for model, content in self.conn.execute(
+            "SELECT embedding_model, content FROM facts WHERE embedding_json != ''"
+        ).fetchall():
+            if model:
+                referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
+        for model, content in self.conn.execute(
+            "SELECT embedding_model, content FROM journal "
+            "WHERE embedding_json != '' AND type != 'contradiction'"
+        ).fetchall():
+            if model:
+                referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
+        for model, task, summary in self.conn.execute(
+            "SELECT embedding_model, task, summary FROM episodes "
+            "WHERE embedding_json != '' AND is_gap_marker = 0"
+        ).fetchall():
+            if model:
+                text = f"{task}\n{summary or ''}".strip()
+                referenced.add((model, hashlib.sha256(text.encode("utf-8")).hexdigest()))
+
+        # Delete cache rows whose (model_name, text_hash) is not referenced.
+        # We do this in batches to avoid a huge transaction for large caches.
+        deleted = 0
+        batch_size = 1000
+        while True:
+            rows = self.conn.execute(
+                "SELECT cache_key, model_name, text_hash FROM embedding_cache "
+                "LIMIT ?",
+                (batch_size,),
+            ).fetchall()
+            if not rows:
+                break
+            to_delete = [
+                key for key, model, text_hash in rows
+                if (model, text_hash) not in referenced
+            ]
+            if to_delete:
+                placeholders = ",".join("?" * len(to_delete))
+                cur = self.conn.execute(
+                    f"DELETE FROM embedding_cache WHERE cache_key IN ({placeholders})",
+                    to_delete,
+                )
+                deleted += cur.rowcount
+                self.conn.commit()
+            if len(rows) < batch_size:
+                break
+        return deleted
 
     def run_vacuum(self) -> dict:
         """Reclaim disk space by rebuilding the database file.
@@ -452,6 +537,8 @@ class GCMixin:
             embedded_journal=counts.get("journal", {}).get("embedded", 0),
             pending_embeddings=pending,
             embedding_health=health,
+            embedding_cache_entries=health.get("embedding_cache", {}).get("entries", 0),
+            embedding_cache_bytes=health.get("embedding_cache", {}).get("vector_json_bytes", 0),
             total_reflections=summary.get("total_reflections", 0),
             last_reflection_at=last_reflection,
             avg_keep_rate=summary.get("avg_keep_rate"),

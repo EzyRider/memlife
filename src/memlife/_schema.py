@@ -188,6 +188,22 @@ class SchemaMixin:
             );
             CREATE INDEX IF NOT EXISTS idx_provenance_source
                 ON triple_provenance(source_kind, source_id);
+
+            -- Embedding cache (0.6.0): content-addressable vectors keyed on
+            -- (model_name, sha256(text)).  Vectors are stored as canonical JSON
+            -- floats so switching vector_backend never leaves cache rows unreadable.
+            CREATE TABLE IF NOT EXISTS embedding_cache (
+                cache_key TEXT PRIMARY KEY,
+                model_name TEXT NOT NULL,
+                text_hash TEXT NOT NULL,
+                vector_json TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                last_used_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_embedding_cache_model_hash
+                ON embedding_cache(model_name, text_hash);
+            CREATE INDEX IF NOT EXISTS idx_embedding_cache_last_used
+                ON embedding_cache(last_used_at);
         """)
         self.conn.commit()
 
@@ -206,6 +222,7 @@ class SchemaMixin:
             "reflection_queue", "sessions", "reflection_metrics",
             "reflection_passes", "episode_tools", "temporal_triples",
             "entities", "entity_aliases", "triple_provenance",
+            "embedding_cache",
         }
         expected_columns = {
             ("episodes", "embedding_json"),
@@ -443,6 +460,24 @@ class SchemaMixin:
             self.conn.execute("ALTER TABLE journal ADD COLUMN annotations_json TEXT DEFAULT '[]'")
         if "links_json" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN links_json TEXT DEFAULT '[]'")
+
+        # 0.6.0: ensure embedding_cache table exists in existing databases.
+        ccols = {r["name"] for r in self.conn.execute("PRAGMA table_info(embedding_cache)")}
+        if not ccols:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS embedding_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    model_name TEXT NOT NULL,
+                    text_hash TEXT NOT NULL,
+                    vector_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_used_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_embedding_cache_model_hash
+                    ON embedding_cache(model_name, text_hash);
+                CREATE INDEX IF NOT EXISTS idx_embedding_cache_last_used
+                    ON embedding_cache(last_used_at);
+            """)
 
         self.conn.commit()
 

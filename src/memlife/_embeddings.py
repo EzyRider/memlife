@@ -1,11 +1,14 @@
-"""Embed texts, serialise vectors, and backfill stale embeddings.
+"""Embed texts, serialise vectors, backfill stale embeddings, and cache vectors.
 
 Extracted from store.py as part of the mixin refactor.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmbedMixin:
-    """Embed texts, serialise vectors, and backfill stale embeddings."""
+    """Embed texts, serialise vectors, backfill stale embeddings, and cache vectors."""
 
     db_path: str
     config: object
@@ -41,8 +44,97 @@ class EmbedMixin:
             return
         self.vector_backend.store(kind, item_id, vec)
 
+    def _cache_key(self, model_name: str, text: str) -> str:
+        """Content-addressable key: model name + sha256 of text."""
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return f"{model_name}:{text_hash}"
+
+    def _text_hash(self, text: str) -> str:
+        """SHA-256 hex digest of text."""
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _cache_enabled(self) -> bool:
+        """True if the embedding cache is enabled and we have a model name."""
+        return bool(
+            getattr(self.config, "embedding_cache_enabled", True)
+            and self.embedding_model_name
+        )
+
+    def _cache_lookup(self, texts: list[str]) -> tuple[list[list[float] | None], int]:
+        """Look up cached vectors for ``texts`` under the current model.
+
+        Returns a parallel list of vectors (None for cache misses) and the
+        count of hits.  Updates ``last_used_at`` for each hit.
+        """
+        if not self._cache_enabled() or not texts:
+            return [None] * len(texts), 0
+
+        now = time.time()
+        model = self.embedding_model_name
+        hits: list[list[float] | None] = [None] * len(texts)
+        hit_count = 0
+        for i, text in enumerate(texts):
+            key = self._cache_key(model, text)
+            row = self.conn.execute(
+                "SELECT vector_json FROM embedding_cache WHERE cache_key = ?",
+                (key,),
+            ).fetchone()
+            if row:
+                try:
+                    vec = json.loads(row[0])
+                    if vec and isinstance(vec, list) and all(
+                        isinstance(x, (int, float)) for x in vec
+                    ):
+                        hits[i] = vec
+                        hit_count += 1
+                        self.conn.execute(
+                            "UPDATE embedding_cache SET last_used_at = ? WHERE cache_key = ?",
+                            (now, key),
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        if hit_count:
+            self.conn.commit()
+        return hits, hit_count
+
+    def _cache_store(self, texts: list[str], vectors: list[list[float] | None]) -> int:
+        """Store non-None vectors in the embedding cache.  Returns stored count."""
+        if not self._cache_enabled():
+            return 0
+        now = time.time()
+        model = self.embedding_model_name
+        stored = 0
+        for text, vec in zip(texts, vectors):
+            if not vec:
+                continue
+            key = self._cache_key(model, text)
+            try:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO embedding_cache "
+                    "(cache_key, model_name, text_hash, vector_json, created_at, last_used_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        key,
+                        model,
+                        self._text_hash(text),
+                        json.dumps(vec),
+                        now,
+                        now,
+                    ),
+                )
+                stored += 1
+            except Exception:
+                logger.warning("Failed to store embedding cache entry", exc_info=True)
+        if stored:
+            self.conn.commit()
+        return stored
+
     async def embed_texts(self, texts: list[str]) -> list[list[float]] | None:
         """Best-effort embedding; returns None if no embedder or it fails.
+
+        Uses the embedding cache when enabled, so repeated text with the
+        same model is cheap.  Cache entries are canonical float vectors,
+        independent of the configured vector_backend.
 
         Failures are logged at WARNING (not DEBUG) so silent degradation to
         keyword recall is visible to operators — an absent or misconfigured
@@ -50,8 +142,18 @@ class EmbedMixin:
         """
         if self.embedder is None or not texts:
             return None
+
+        # 1. Try cache.
+        cached, hits = self._cache_lookup(texts)
+        if hits == len(texts):
+            return cached  # type: ignore[return-value]
+
+        # 2. Collect texts that missed the cache.
+        missing_indices = [i for i, v in enumerate(cached) if v is None]
+        missing_texts = [texts[i] for i in missing_indices]
+
         try:
-            result = await self.embedder.embed(texts)
+            result = await self.embedder.embed(missing_texts)
             if result is not None:
                 dims = {len(v) for v in result if v}
                 if len(dims) > 1:
@@ -61,7 +163,6 @@ class EmbedMixin:
                     self._embed_failures += 1
                     return None
                 self._embed_failures = 0  # reset on success
-            return result
         except Exception as exc:  # noqa: BLE001
             self._embed_failures += 1
             logger.warning(
@@ -76,6 +177,17 @@ class EmbedMixin:
                     self._embed_failures,
                 )
             return None
+
+        if result is None:
+            return None
+
+        # 3. Merge cached + fresh, write fresh to cache.
+        final: list[list[float] | None] = list(cached)
+        for idx, vec in zip(missing_indices, result):
+            final[idx] = vec
+
+        self._cache_store(missing_texts, result)
+        return final  # type: ignore[return-value]
 
     def embedding_health(self) -> dict:
         """Return a snapshot of embedding coverage across all memory layers.
@@ -106,6 +218,7 @@ class EmbedMixin:
             return {"total": total, "with_embeddings": with_vec,
                     "missing": total - with_vec, "stale": stale}
 
+        cache_stats = self._embedding_cache_stats()
         health = {
             "facts": _count("facts"),
             "journal": _count("journal"),
@@ -113,9 +226,22 @@ class EmbedMixin:
             "embedding_model": self.embedding_model_name,
             "consecutive_failures": self._embed_failures,
             "embedder_present": self.embedder is not None,
+            "embedding_cache": cache_stats,
         }
         health.update(self.vector_backend.health())
         return health
+
+    def _embedding_cache_stats(self) -> dict:
+        """Return cache row count and estimated size in bytes."""
+        row = self.conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(vector_json)), 0) "
+            "FROM embedding_cache"
+        ).fetchone()
+        return {
+            "enabled": self._cache_enabled(),
+            "entries": row[0] if row else 0,
+            "vector_json_bytes": row[1] if row else 0,
+        }
 
     async def backfill_embeddings(self, batch_size: int = 20) -> dict:
         """Re-embed facts, journal entries, and episodes that are missing vectors
@@ -124,7 +250,8 @@ class EmbedMixin:
         Processes in batches to avoid hammering the embedder. Skips items where
         the content is empty. Returns counts of how many were embedded and how
         many failed. Safe to run repeatedly — only processes items with empty
-        embedding_json or a mismatched embedding_model.
+        embedding_json or a mismatched embedding_model.  The embedding cache is
+        primed for every text that is sent to the embedder.
         """
         results = {"facts_embedded": 0, "journal_embedded": 0,
                     "episodes_embedded": 0, "failed": 0}
