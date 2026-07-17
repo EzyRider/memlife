@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-07-18
+
+### Changed
+
+- Synchronised `main` branch with the 0.6.2 and 0.6.3 release tags so GitHub
+  README and source tree match PyPI.
+- `memlife.__version__` and `pyproject.toml` version bumped to 0.6.4.
+
 ## [0.6.3] - 2026-07-18
 
 ### Changed

@@ -6,26 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.3**
-
-## What's New
-
-### 0.6.3
-- README and version metadata are now kept in sync with releases.
-
-### 0.6.2
-- Graph relationship traversal now follows **incoming** edges as well as outgoing edges.
-- Entity canonicalisation is case-insensitive, preventing duplicate `James`/`james` nodes.
-- `retrieve()` accepts `debug=True` and `SyncMemoryStore.store_mention_triple()` was added for API parity.
-
-### 0.6.1
-- Migration idempotency fix, `fact_conflict_threshold` wired correctly, and graph-integrated retrieval scoring improvements.
-- Polyphonic recall respects the score cutoff and debug output includes linking triples.
-
-### 0.6.0
-- **Embedding cache** — content-addressable, LRU-capped embedding cache.
-- **Automatic entity extraction** — deterministic, zero-LLM extraction of entities from facts, episodes, and journal entries.
-- **Graph-integrated retrieval** — `retrieve()` boosts candidates linked to entities mentioned in the query.
+**Current version: 0.6.4**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -244,10 +225,43 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
 
+## What's new in 0.6.4
+
+- Synchronised `main` branch with the 0.6.2 and 0.6.3 release tags so the GitHub source tree and README match PyPI.
+
+## What's new in 0.6.3
+
+- README now reports the current version and includes a consolidated "What's New" section.
+- `memlife.__version__` and `pyproject.toml` version metadata are kept in sync with releases.
+
+## What's new in 0.6.2
+
+- Graph relationship traversal now follows **incoming** edges as well as outgoing edges, so querying an entity that appears as the object of a relationship discovers related sources.
+- Entity canonicalisation is case-insensitive when creating or ensuring entities. Manual `store_triple("James", ...)` reuses an auto-extracted canonical entity "james" instead of creating a duplicate "James" node.
+- `MemoryStore.retrieve()` and `SyncMemoryStore.retrieve()` now accept `debug=True` and return the structured debug dict.
+- `SyncMemoryStore.store_mention_triple()` added for parity with the async `MemoryStore` API.
+- Regression test suite for graph-integrated retrieval added (`tests/test_graph_retrieval.py`).
+
+## What's new in 0.6.1
+
+- `_schema._migrate()` now re-reads journal columns before adding `annotations_json` / `links_json`, making migration idempotent on partially-migrated databases.
+- `FactStore.check_conflicts()` keyword fallback now respects `fact_conflict_threshold` instead of hardcoding 0.5.
+- Graph-integrated retrieval now scales `graph_signal` by the confidence of the strongest currently-valid linking triple, rather than giving every linked candidate a flat 1.0 boost.
+- Graph retrieval no longer surfaces superseded facts, retired/superseded journal entries, or contradiction rows.
+- `retrieve()` now skips vector-recalled episodes that were already added via graph expansion, avoiding duplicate episode candidates.
+- Graph expansion failures are caught and logged instead of crashing the whole retrieval call.
+- Polyphonic recall now runs RRF only on candidates that passed the score cutoff, so cutoff configuration remains meaningful.
+- Debug output now includes the actual triples that produced a graph link in `graph_triples`.
+
+## What's new in 0.6.0
+
+- **Embedding cache** — content-addressable, LRU-capped embedding cache.
+- **Automatic entity extraction** — deterministic, zero-LLM extraction of entities from facts, episodes, and journal entries.
+- **Graph-integrated retrieval** — `retrieve()` boosts candidates linked to entities mentioned in the query.
+
 ## What's new in 0.5.5
 
-- **Version consistency.** `memlife.__version__` now matches `pyproject.toml`
-  (0.5.5).
+- **Version consistency.** `memlife.__version__` now matches `pyproject.toml` (0.5.5).
 - **README accuracy.** The MCP server tool list now lists only implemented
   tools and clarifies that `memlife://contradictions` is a resource, not a tool.
   The `MemoryConfig` example now uses real fields (`reflection_timeout`,
