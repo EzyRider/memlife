@@ -172,3 +172,55 @@ async def test_cache_entries_are_canonical_floats(store):
     vec = __import__("json").loads(row[2])
     assert isinstance(vec, list)
     assert all(isinstance(x, (int, float)) for x in vec)
+
+
+def test_gc_does_not_loop_when_first_batch_is_all_referenced(store):
+    """Regression for the 0.6.4 audit: _prune_unreferenced_embedding_cache
+    used LIMIT without an offset/keyset, so when the first batch_size rows
+    were all referenced it fetched the same rows forever.
+    """
+    import signal
+    import time
+
+    model = store.embedding_model_name or "dummy"
+    now = time.time()
+    n = 1001  # larger than the 1000-row batch size
+
+    for i in range(n):
+        text = f"referenced cache row {i:04d}"
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        cache_key = f"{model}:{text_hash}"
+        store.conn.execute(
+            "INSERT OR IGNORE INTO embedding_cache "
+            "(cache_key, model_name, text_hash, vector_json, created_at, last_used_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (cache_key, model, text_hash, "[1.0, 2.0]", now, now),
+        )
+        store.conn.execute(
+            "INSERT INTO facts (id, content, source, confidence, created_at, "
+            "updated_at, embedding_model, embedding_json, superseded_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (f"fact_{i}", text, "agent", 0.8, now, now, model, "[1.0, 2.0]", ""),
+        )
+    store.conn.commit()
+
+    def _timeout(_signum, _frame):
+        raise AssertionError("run_gc hung on all-referenced embedding cache rows")
+
+    old_handler = signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(5)
+    try:
+        pruned = store.run_gc(
+            superseded_facts_days=0,
+            superseded_journal_days=0,
+            completed_runs_days=0,
+            metrics_days=0,
+            reflected_queue_days=0,
+            episodes_days=0,
+        )
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+    assert pruned.get("embedding_cache_unreferenced", 0) == 0
+    assert store.embedding_health()["embedding_cache"]["entries"] == n

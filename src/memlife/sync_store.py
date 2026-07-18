@@ -183,10 +183,16 @@ class SyncMemoryStore:
         return self._store.store_triple(subject, predicate, object, confidence=confidence)
 
     def store_mention_triple(
-        self, source_kind: str, source_id: str, entity: str, confidence: float = 0.6
+        self,
+        source_kind: str,
+        source_id: str,
+        entity: str,
+        confidence: float = 0.6,
+        *,
+        commit: bool = True,
     ) -> str:
         return self._store.store_mention_triple(
-            source_kind, source_id, entity, confidence=confidence
+            source_kind, source_id, entity, confidence=confidence, commit=commit
         )
 
     def triples_about(self, entity: str, predicate: str | None = None, limit: int = 20):
@@ -203,8 +209,10 @@ class SyncMemoryStore:
         return self._store.entity_neighbors(entity, predicate=predicate,
                                             depth=depth, limit=limit)
 
-    def add_entity_alias(self, canonical_name: str, alias: str) -> bool:
-        return self._store.add_entity_alias(canonical_name, alias)
+    def add_entity_alias(
+        self, canonical_name: str, alias: str, *, commit: bool = True
+    ) -> bool:
+        return self._store.add_entity_alias(canonical_name, alias, commit=commit)
 
     def resolve_entity(self, name: str) -> str | None:
         return self._store.resolve_entity(name)

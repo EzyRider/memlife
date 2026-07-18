@@ -65,66 +65,116 @@ class EmbedMixin:
 
         Returns a parallel list of vectors (None for cache misses) and the
         count of hits.  Updates ``last_used_at`` for each hit.
+
+        Queries are batched so a request with N texts costs 1-2 round-trips
+        instead of N individual SELECTs plus N UPDATEs.
         """
         if not self._cache_enabled() or not texts:
             return [None] * len(texts), 0
 
         now = time.time()
         model = self.embedding_model_name
+        keys = [self._cache_key(model, text) for text in texts]
         hits: list[list[float] | None] = [None] * len(texts)
         hit_count = 0
-        for i, text in enumerate(texts):
-            key = self._cache_key(model, text)
-            row = self.conn.execute(
-                "SELECT vector_json FROM embedding_cache WHERE cache_key = ?",
-                (key,),
-            ).fetchone()
-            if row:
+        key_to_vec: dict[str, list[float]] = {}
+
+        # SQLite has a default 999-parameter limit; stay well under it.
+        chunk = 900
+        for i in range(0, len(keys), chunk):
+            batch_keys = keys[i : i + chunk]
+            placeholders = ",".join("?" * len(batch_keys))
+            rows = self.conn.execute(
+                f"SELECT cache_key, vector_json FROM embedding_cache "
+                f"WHERE cache_key IN ({placeholders})",
+                tuple(batch_keys),
+            ).fetchall()
+            for key, raw in rows:
                 try:
-                    vec = json.loads(row[0])
+                    vec = json.loads(raw)
                     if vec and isinstance(vec, list) and all(
                         isinstance(x, (int, float)) for x in vec
                     ):
-                        hits[i] = vec
-                        hit_count += 1
-                        self.conn.execute(
-                            "UPDATE embedding_cache SET last_used_at = ? WHERE cache_key = ?",
-                            (now, key),
-                        )
+                        key_to_vec[key] = vec
                 except (json.JSONDecodeError, TypeError):
                     pass
-        if hit_count:
+
+        hit_keys: list[str] = []
+        for i, text in enumerate(texts):
+            vec = key_to_vec.get(keys[i])
+            if vec is not None:
+                hits[i] = vec
+                hit_count += 1
+                hit_keys.append(keys[i])
+
+        if hit_keys:
+            # A single text may appear multiple times in ``texts``; only
+            # update last_used_at once per distinct cache key.
+            unique_hit_keys = list(dict.fromkeys(hit_keys))
+            for i in range(0, len(unique_hit_keys), chunk):
+                batch_keys = unique_hit_keys[i : i + chunk]
+                placeholders = ",".join("?" * len(batch_keys))
+                self.conn.execute(
+                    f"UPDATE embedding_cache SET last_used_at = ? "
+                    f"WHERE cache_key IN ({placeholders})",
+                    (now, *batch_keys),
+                )
             self.conn.commit()
         return hits, hit_count
 
     def _cache_store(self, texts: list[str], vectors: list[list[float] | None]) -> int:
-        """Store non-None vectors in the embedding cache.  Returns stored count."""
+        """Store non-None vectors in the embedding cache.  Returns stored count.
+
+        Inserts are batched into multi-row ``INSERT OR REPLACE`` statements
+        so a batch of N vectors costs a small number of round-trips instead
+        of N individual INSERTs.
+        """
         if not self._cache_enabled():
             return 0
         now = time.time()
         model = self.embedding_model_name
-        stored = 0
+
+        rows: list[tuple[str, str, str, str, float, float]] = []
         for text, vec in zip(texts, vectors):
             if not vec:
                 continue
-            key = self._cache_key(model, text)
-            try:
-                self.conn.execute(
-                    "INSERT OR REPLACE INTO embedding_cache "
-                    "(cache_key, model_name, text_hash, vector_json, created_at, last_used_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        key,
-                        model,
-                        self._text_hash(text),
-                        json.dumps(vec),
-                        now,
-                        now,
-                    ),
+            # Guard against buggy embedders that return non-numeric vectors.
+            if not all(isinstance(x, (int, float)) for x in vec):
+                logger.warning(
+                    "Skipping non-numeric embedding cache entry for text %r", text
                 )
-                stored += 1
+                continue
+            rows.append(
+                (
+                    self._cache_key(model, text),
+                    model,
+                    self._text_hash(text),
+                    json.dumps(vec),
+                    now,
+                    now,
+                )
+            )
+
+        # 6 parameters per row; keep total params under SQLite's 999 limit.
+        chunk = 150
+        stored = 0
+        for i in range(0, len(rows), chunk):
+            batch = rows[i : i + chunk]
+            placeholders = ",".join(["(?, ?, ?, ?, ?, ?)"] * len(batch))
+            params = [value for row in batch for value in row]
+            try:
+                cur = self.conn.execute(
+                    f"INSERT OR REPLACE INTO embedding_cache "
+                    f"(cache_key, model_name, text_hash, vector_json, created_at, last_used_at) "
+                    f"VALUES {placeholders}",
+                    params,
+                )
+                if cur.rowcount > 0:
+                    stored += cur.rowcount
+                else:
+                    stored += len(batch)
             except Exception:
-                logger.warning("Failed to store embedding cache entry", exc_info=True)
+                logger.warning("Failed to store embedding cache entries", exc_info=True)
         if stored:
             self.conn.commit()
         return stored

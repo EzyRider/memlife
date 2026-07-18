@@ -36,6 +36,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 
 from memlife.config import MemoryConfig
@@ -111,6 +112,7 @@ def create_server(
 
     # Tool-call logging state.
     _logged_tool_calls: dict[tuple[str, str], float] = {}
+    _logged_tool_calls_lock = threading.Lock()
 
     # Lazy-init: Reflector and chat adapter created on first reflect() call.
     _reflector = None
@@ -171,9 +173,11 @@ def create_server(
             # Bound the dedup cache so it cannot grow unbounded on a long-running
             # server. Evict oldest entries (insertion order) until there is room
             # for the new key. 1000 keys * ~64 bytes each is negligible.
-            while len(_logged_tool_calls) >= _LOGGED_TOOL_CALLS_MAX_SIZE:
-                _logged_tool_calls.pop(next(iter(_logged_tool_calls)))
-            _logged_tool_calls[key] = now
+            # The lock guards the size check + pop against concurrent tool threads.
+            with _logged_tool_calls_lock:
+                while len(_logged_tool_calls) >= _LOGGED_TOOL_CALLS_MAX_SIZE:
+                    _logged_tool_calls.pop(next(iter(_logged_tool_calls)))
+                _logged_tool_calls[key] = now
             store.remember(
                 task=f"Tool call: {tool_name}",
                 outcome=outcome,
@@ -407,10 +411,14 @@ def create_server(
             f"  reflection metrics: {result.get('reflection_metrics', 0)}\n"
             f"  reflected queue:    {result.get('reflected_queue', 0)}\n"
             f"  episodes:           {result.get('episodes', 0)}\n"
+            f"  episode tools:      {result.get('episode_tools', 0)}\n"
+            f"  mention triples:    {result.get('mention_triples_for_deleted_sources', 0)}\n"
             f"  closed triples:     {result.get('closed_triples', 0)}\n"
             f"  orphan provenance:  {result.get('orphan_provenance', 0)}\n"
             f"  orphan aliases:     {result.get('orphan_aliases', 0)}\n"
-            f"  orphan entities:    {result.get('orphan_entities', 0)}"
+            f"  orphan entities:    {result.get('orphan_entities', 0)}\n"
+            f"  embedding cache unreferenced: {result.get('embedding_cache_unreferenced', 0)}\n"
+            f"  embedding cache evicted LRU:  {result.get('embedding_cache_evicted_lru', 0)}"
         )
 
     @mcp.tool()

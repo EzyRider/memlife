@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-07-18
+
+### Fixed
+
+- Infinite-loop bug in `_prune_unreferenced_embedding_cache`: when the first
+  batch of cache rows were all still referenced, the old `LIMIT`-only scan
+  would fetch the same rows forever. The scan now uses keyset pagination by
+  `cache_key` so deletion never causes rows to be skipped or re-scanned.
+- `_cache_lookup` and `_cache_store` now use batched SQL statements, reducing
+  round-trips from O(N) per text to 1–2 per batch.
+- `extract_and_link_entities` now persists mention triples and entity aliases
+  in a single transaction instead of committing once per extracted entity.
+- `memory_gc` MCP tool output now includes `mention_triples_for_deleted_sources`,
+  `episode_tools`, `embedding_cache_unreferenced`, and
+  `embedding_cache_evicted_lru` counts.
+
+### Changed
+
+- `_prune_unreferenced_embedding_cache` streams referenced rows from the cursor
+  rather than `fetchall()` so memory usage stays flat for large databases.
+- `_cache_store` now skips non-numeric embedding vectors instead of writing
+  them to the cache.
+- MCP tool-call dedup eviction is now guarded by a lock to remove a latent
+  race when multiple tool threads log calls concurrently.
+- `memlife.__version__` and `pyproject.toml` version bumped to 0.6.5.
+
 ## [0.6.4] - 2026-07-18
 
 ### Changed

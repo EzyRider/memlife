@@ -390,35 +390,41 @@ class GCMixin:
         # Build the set of referenced (model_name, text_hash) pairs from the
         # three tables that store embeddings.  Contradictions are excluded
         # because they are never embedded (MF-005).
+        # We stream rows directly from the cursor instead of fetchall() so
+        # memory usage stays flat for large databases.
         referenced: set[tuple[str, str]] = set()
         for model, content in self.conn.execute(
             "SELECT embedding_model, content FROM facts WHERE embedding_json != ''"
-        ).fetchall():
+        ):
             if model:
                 referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
         for model, content in self.conn.execute(
             "SELECT embedding_model, content FROM journal "
             "WHERE embedding_json != '' AND type != 'contradiction'"
-        ).fetchall():
+        ):
             if model:
                 referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
         for model, task, summary in self.conn.execute(
             "SELECT embedding_model, task, summary FROM episodes "
             "WHERE embedding_json != '' AND is_gap_marker = 0"
-        ).fetchall():
+        ):
             if model:
                 text = f"{task}\n{summary or ''}".strip()
                 referenced.add((model, hashlib.sha256(text.encode("utf-8")).hexdigest()))
 
         # Delete cache rows whose (model_name, text_hash) is not referenced.
         # We do this in batches to avoid a huge transaction for large caches.
+        # Keyset pagination by cache_key is used instead of LIMIT/OFFSET so
+        # deleting rows in one batch never causes the next batch to skip or
+        # re-scan rows (and never loops infinitely when all rows are referenced).
         deleted = 0
         batch_size = 1000
+        last_key = ""
         while True:
             rows = self.conn.execute(
                 "SELECT cache_key, model_name, text_hash FROM embedding_cache "
-                "LIMIT ?",
-                (batch_size,),
+                "WHERE cache_key > ? ORDER BY cache_key LIMIT ?",
+                (last_key, batch_size),
             ).fetchall()
             if not rows:
                 break
@@ -434,6 +440,7 @@ class GCMixin:
                 )
                 deleted += cur.rowcount
                 self.conn.commit()
+            last_key = rows[-1][0]
             if len(rows) < batch_size:
                 break
         return deleted

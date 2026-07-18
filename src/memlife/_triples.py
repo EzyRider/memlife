@@ -102,6 +102,8 @@ class TripleMixin:
         source_id: str,
         entity: str,
         confidence: float = 0.6,
+        *,
+        commit: bool = True,
     ) -> str:
         """Record that ``source_id`` (a fact/episode/journal) mentions ``entity``.
 
@@ -110,6 +112,9 @@ class TripleMixin:
         object is treated as an entity; the source id is a foreign key, not a
         graph node. The triple is tagged with provenance so GC can remove it
         when the source row is pruned. Returns the triple id.
+
+        ``commit=False`` is used by ``extract_and_link_entities`` so that a
+        batch of extracted entities can be persisted in a single transaction.
         """
         now = time.time()
         triple_id = f"triple_{uuid.uuid4().hex[:12]}"
@@ -124,7 +129,8 @@ class TripleMixin:
              now, None, None, min(float(confidence), MAX_FACT_CONFIDENCE), now),
         )
         self._add_triple_provenance(triple_id, [{"kind": source_kind, "id": source_id}])
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return triple_id
 
     def extract_and_link_entities(
@@ -148,15 +154,22 @@ class TripleMixin:
         allowlist = getattr(self.config, "entity_extraction_allowlist", None)
         blocklist = getattr(self.config, "entity_extraction_blocklist", None)
 
+        changed = False
         for canonical, alias in extract_entities(
             text, allowlist=allowlist, blocklist=blocklist
         ):
             canonical = self._ensure_entity(canonical)
             # Store an alias if the original casing differs from the canonical.
             if alias and alias != canonical:
-                self.add_entity_alias(canonical, alias)
+                if self.add_entity_alias(canonical, alias, commit=False):
+                    changed = True
             if mentions_enabled:
-                self.store_mention_triple(source_kind, source_id, canonical, confidence)
+                self.store_mention_triple(
+                    source_kind, source_id, canonical, confidence, commit=False
+                )
+                changed = True
+        if changed:
+            self.conn.commit()
 
     def expire_triples_for_fact(self, fact_id: str, valid_until: float | None = None) -> int:
         """Close currently-open triples linked to ``fact_id``.
@@ -514,10 +527,15 @@ class TripleMixin:
 
         return results[:limit]
 
-    def add_entity_alias(self, canonical_name: str, alias: str) -> bool:
+    def add_entity_alias(
+        self, canonical_name: str, alias: str, *, commit: bool = True
+    ) -> bool:
         """Map ``alias`` -> ``canonical_name`` for entity resolution.
 
         Returns True if a new alias was recorded.
+
+        ``commit=False`` is used by ``extract_and_link_entities`` so that a
+        batch of aliases can be persisted in a single transaction.
         """
         canonical = canonical_name.strip()
         alias = alias.strip()
@@ -540,7 +558,8 @@ class TripleMixin:
             "INSERT OR IGNORE INTO entity_aliases (alias, canonical_name) VALUES (?, ?)",
             (alias, canonical),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return True
 
     def resolve_entity(self, name: str) -> str | None:

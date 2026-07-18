@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.4**
+**Current version: 0.6.5**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -224,6 +224,14 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > checksum errors. Use a local, non-synced directory. If you still see locking
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
+
+## What's new in 0.6.5
+
+- Fixed an infinite-loop bug in embedding-cache GC: when the first batch of cache rows were all still referenced, the old `LIMIT`/`OFFSET`-less scan would fetch the same rows forever. GC now uses keyset pagination by `cache_key`.
+- Embedding-cache lookup and storage are now batched, cutting round-trips from O(N) per text to 1–2 per batch.
+- Auto-extracted entity mention triples and aliases are now committed in a single transaction instead of one commit per entity.
+- GC output from the MCP `memory_gc` tool now includes mention-triple pruning, embedding-cache unreferenced rows, and LRU eviction counts.
+- Tool-call dedup eviction in the MCP server is now guarded by a lock to avoid a latent race under concurrent tool threads.
 
 ## What's new in 0.6.4
 
