@@ -221,7 +221,7 @@ class TripleMixin:
         if no open triple exists.
         """
         now = time.time()
-        subj = self.resolve_entity(subject.strip()) or subject.strip()
+        subj = self.resolve_entity_ci(subject.strip()) or subject.strip()
         row = self.conn.execute(
             "SELECT id, object, confidence FROM temporal_triples "
             "WHERE subject = ? AND predicate = ? "
@@ -240,7 +240,7 @@ class TripleMixin:
 
         Returns ``(object, confidence, triple_id)`` or ``(None, 0.0, None)``.
         """
-        subj = self.resolve_entity(subject.strip()) or subject.strip()
+        subj = self.resolve_entity_ci(subject.strip()) or subject.strip()
         row = self.conn.execute(
             "SELECT id, object, confidence FROM temporal_triples "
             "WHERE subject = ? AND predicate = ? "
@@ -276,7 +276,7 @@ class TripleMixin:
         self, entity: str, predicate: str | None = None, limit: int = 20,
     ) -> list[dict]:
         """Return triples where ``entity`` appears as subject or object."""
-        canonical = self.resolve_entity(entity.strip()) or entity.strip()
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
         sql = (
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
             "confidence, created_at FROM temporal_triples "
@@ -305,7 +305,7 @@ class TripleMixin:
         self, entity: str, predicate: str | None = None, limit: int = 20,
     ) -> list[dict]:
         """Return outgoing triples from ``entity``."""
-        canonical = self.resolve_entity(entity.strip()) or entity.strip()
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
         sql = (
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
             "confidence, created_at FROM temporal_triples WHERE subject = ?"
@@ -457,7 +457,7 @@ class TripleMixin:
         self, entity: str, predicate: str | None = None, limit: int = 20,
     ) -> list[dict]:
         """Return incoming triples to ``entity``."""
-        canonical = self.resolve_entity(entity.strip()) or entity.strip()
+        canonical = self.resolve_entity_ci(entity.strip()) or entity.strip()
         sql = (
             "SELECT id, subject, predicate, object, valid_from, valid_until, "
             "confidence, created_at FROM temporal_triples WHERE object = ?"
@@ -494,7 +494,7 @@ class TripleMixin:
         "via": [triple_dict, ...]}`` entries.  The start entity itself is
         not included.  ``depth`` controls how many edge-hops to follow.
         """
-        start = self.resolve_entity(entity.strip()) or entity.strip()
+        start = self.resolve_entity_ci(entity.strip()) or entity.strip()
         seen: set[str] = {start}
         frontier: set[str] = {start}
         results: list[dict] = []

@@ -1,5 +1,7 @@
 """Tests for graph/triples layer (entity normalization, provenance, traversal)."""
 
+import time
+
 import pytest
 
 from memlife import MemoryConfig, MemoryStore
@@ -100,6 +102,43 @@ def test_current_truth_still_works(graph_store):
     obj, conf, _ = store.current_truth("user", "prefers")
     assert obj == "dark mode"
     assert conf == pytest.approx(0.95)
+
+
+def test_query_paths_resolve_entities_case_insensitively(graph_store):
+    """All triple query paths should use case-insensitive entity resolution.
+
+    The store path uses resolve_entity_ci, so a triple stored under 'James'
+    must be reachable by 'james', 'JAMES', or an alias.
+    """
+    store = graph_store
+    store.store_triple("James", "works_at", "Acme", confidence=0.9)
+    store.store_triple("Carol", "knows", "james")
+    store.add_entity_alias("James", "Jimmy")
+
+    # triples_about
+    assert len(store.triples_about("james")) == 2
+    assert len(store.triples_about("JAMES")) == 2
+    assert len(store.triples_about("Jimmy")) == 2
+
+    # triples_from
+    assert {t["object"] for t in store.triples_from("james")} == {"Acme"}
+
+    # triples_to
+    assert {t["subject"] for t in store.triples_to("JAMES")} == {"Carol"}
+
+    # current_truth
+    obj, conf, _ = store.current_truth("jimmy", "works_at")
+    assert obj == "Acme"
+    assert conf == pytest.approx(0.9)
+
+    # truth_as_of
+    obj, conf, _ = store.truth_as_of("JAMES", "works_at", time.time())
+    assert obj == "Acme"
+
+    # entity_neighbors
+    neighbors = store.entity_neighbors("james", depth=1)
+    names = {n["entity"] for n in neighbors}
+    assert names == {"Acme", "Carol"}
 
 
 def test_mcp_server_registers_triple_tools(tmp_path):
