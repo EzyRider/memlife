@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.5**
+**Current version: 0.6.6**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -232,6 +232,11 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 - Auto-extracted entity mention triples and aliases are now committed in a single transaction instead of one commit per entity.
 - GC output from the MCP `memory_gc` tool now includes mention-triple pruning, embedding-cache unreferenced rows, and LRU eviction counts.
 - Tool-call dedup eviction in the MCP server is now guarded by a lock to avoid a latent race under concurrent tool threads.
+
+## What's new in 0.6.6
+
+- Fixed a case-sensitivity bug in triple queries: `triples_about`, `triples_from`, `triples_to`, `current_truth`, `truth_as_of`, and `entity_neighbors` now resolve entities case-insensitively and via aliases, matching the insertion path. Querying "james" returns triples stored under "James" or its alias "Jimmy".
+- Added a regression test covering mixed-case entity queries and alias resolution.
 
 ## What's new in 0.6.4
 

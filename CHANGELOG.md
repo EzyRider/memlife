@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-07-18
+
 ### Fixed
 
 - Triple query paths (`triples_about`, `triples_from`, `triples_to`,
