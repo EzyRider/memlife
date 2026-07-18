@@ -225,6 +225,11 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
 
+## What's new in 0.6.6
+
+- Fixed a case-sensitivity bug in triple queries: `triples_about`, `triples_from`, `triples_to`, `current_truth`, `truth_as_of`, and `entity_neighbors` now resolve entities case-insensitively and via aliases, matching the insertion path. Querying "james" returns triples stored under "James" or its alias "Jimmy".
+- Added a regression test covering mixed-case entity queries and alias resolution.
+
 ## What's new in 0.6.5
 
 - Fixed an infinite-loop bug in embedding-cache GC: when the first batch of cache rows were all still referenced, the old `LIMIT`/`OFFSET`-less scan would fetch the same rows forever. GC now uses keyset pagination by `cache_key`.
@@ -232,11 +237,6 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 - Auto-extracted entity mention triples and aliases are now committed in a single transaction instead of one commit per entity.
 - GC output from the MCP `memory_gc` tool now includes mention-triple pruning, embedding-cache unreferenced rows, and LRU eviction counts.
 - Tool-call dedup eviction in the MCP server is now guarded by a lock to avoid a latent race under concurrent tool threads.
-
-## What's new in 0.6.6
-
-- Fixed a case-sensitivity bug in triple queries: `triples_about`, `triples_from`, `triples_to`, `current_truth`, `truth_as_of`, and `entity_neighbors` now resolve entities case-insensitively and via aliases, matching the insertion path. Querying "james" returns triples stored under "James" or its alias "Jimmy".
-- Added a regression test covering mixed-case entity queries and alias resolution.
 
 ## What's new in 0.6.4
 
