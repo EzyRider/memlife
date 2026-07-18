@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-07-18
+
+### Fixed
+
+- Graph-integrated retrieval now matches lowercase queries against stored
+  entities and aliases. Previously `retrieve("james")` would not follow graph
+  links for an entity stored as "James" because the query parser relied solely
+  on the capitalised-proper-noun extractor. Retrieval now scans the query
+  against known entity names and aliases case-insensitively in addition to
+  running the generic extractor.
+
 ## [0.6.6] - 2026-07-18
 
 ### Fixed
