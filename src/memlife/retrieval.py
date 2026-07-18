@@ -153,24 +153,44 @@ def _veracity_for_journal(store: MemoryStore, entry: JournalEntry) -> float:
 def _extract_query_entities(query: str, store: MemoryStore) -> list[tuple[str, str]]:
     """Extract canonical entity names from the query text.
 
-    Uses the same deterministic extractor that populates the graph during
-    storage, honouring the configured allowlist/blocklist. Each extracted
-    canonical name is resolved against the entity/alias tables (case-
-    insensitively) so that a query mentioning "james" matches a stored entity
-    "James".
+    Uses the deterministic extractor that populates the graph during storage,
+    honouring the configured allowlist/blocklist, and also scans the query for
+    already-known entities and aliases case-insensitively.  The generic
+    extractor only recognises capitalised proper nouns, allowlisted terms, and
+    short acronyms, so the second path is required for natural lowercase
+    queries like "what does bob think about hiking" to match a stored entity
+    "Bob".
     """
     from memlife.entity_extractor import extract_entities
 
     allowlist = getattr(store.config, "entity_extraction_allowlist", None)
     blocklist = getattr(store.config, "entity_extraction_blocklist", None)
     raw = extract_entities(query, allowlist=allowlist, blocklist=blocklist)
+
     resolved: list[tuple[str, str]] = []
-    for canonical, alias in raw:
+    seen: set[str] = set()
+
+    def add(canonical: str, alias: str) -> None:
         stored = store.resolve_entity_ci(canonical)
-        if stored:
-            resolved.append((stored, alias))
-        else:
-            resolved.append((canonical, alias))
+        key = stored if stored else canonical
+        if key not in seen:
+            seen.add(key)
+            resolved.append((key, alias))
+
+    for canonical, alias in raw:
+        add(canonical, alias)
+
+    # Second path: match the query against every known entity/alias.
+    lower_query = query.lower()
+    for canonical, phrase in store.list_entity_names():
+        pattern = r"\b" + re.escape(phrase.lower()) + r"\b"
+        if re.search(pattern, lower_query):
+            m = re.search(
+                r"\b" + re.escape(phrase) + r"\b", query, flags=re.IGNORECASE
+            )
+            alias = m.group(0) if m else phrase
+            add(canonical, alias)
+
     return resolved
 
 

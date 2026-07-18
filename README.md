@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.6**
+**Current version: 0.6.7**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -224,6 +224,11 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > checksum errors. Use a local, non-synced directory. If you still see locking
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
+
+## What's new in 0.6.7
+
+- Fixed a silent gap in graph-integrated retrieval: lowercase queries now match stored entities and aliases. Previously `retrieve("james")` would not follow graph links for an entity stored as "James" because the query parser only recognised capitalised proper nouns. The extractor is still used for discovering new entities, but retrieval now also scans the query against known entity names and aliases case-insensitively.
+- Added a regression test for lowercase entity queries in graph retrieval.
 
 ## What's new in 0.6.6
 

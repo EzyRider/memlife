@@ -600,6 +600,33 @@ class TripleMixin:
         ).fetchone()
         return row[0] if row else None
 
+    def list_entity_names(self) -> list[tuple[str, str]]:
+        """Return every stored entity and alias as ``(canonical, phrase)``.
+
+        The returned phrases can be used to scan free-form query text for
+        mentions of already-known entities, case-insensitively.  Aliases are
+        returned alongside their canonical name so a query like "jimmy" can
+        match an entity stored as "James".
+        """
+        phrases: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for (canonical,) in self.conn.execute(
+            "SELECT canonical_name FROM entities"
+        ):
+            key = canonical.lower()
+            if key not in seen:
+                seen.add(key)
+                phrases.append((canonical, canonical))
+        rows = self.conn.execute(
+            "SELECT alias, canonical_name FROM entity_aliases"
+        ).fetchall()
+        for alias, canonical in rows:
+            key = f"{canonical.lower()}::{alias.lower()}"
+            if key not in seen:
+                seen.add(key)
+                phrases.append((canonical, alias))
+        return phrases
+
     def _ensure_entity(self, name: str) -> str:
         """Ensure ``name`` exists as a canonical entity.
 

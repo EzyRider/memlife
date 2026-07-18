@@ -50,6 +50,21 @@ async def test_mention_triple_boosts_episode(graph_store):
 
 
 @pytest.mark.asyncio
+async def test_lowercase_query_finds_known_entity(graph_store):
+    """A lowercase query finds an entity stored with capitalised casing."""
+    store = graph_store
+    ep_id = store.remember(task=" roadmap discussion", outcome="success")
+    store.store_mention_triple("episode", ep_id, "James", confidence=0.7)
+
+    result = await store.retrieve("james", debug=True)
+    by_id = {c["id"]: c for c in result["candidates"]}
+    assert ep_id in by_id
+    assert by_id[ep_id]["graph_signal"] > 0.0
+    assert by_id[ep_id]["graph_triples"]
+    assert any(t["predicate"] == "mentions" for t in by_id[ep_id]["graph_triples"])
+
+
+@pytest.mark.asyncio
 async def test_outgoing_relationship_traversal(graph_store):
     """Alice -> knows -> Bob -> mentions -> episode surfaces when querying Alice."""
     store = graph_store
