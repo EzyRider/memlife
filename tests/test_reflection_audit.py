@@ -7,7 +7,6 @@ import pytest
 from memlife import MemoryConfig, MemoryStore
 from memlife.reflection import ReflectionPass
 
-
 pytestmark = pytest.mark.anyio
 
 

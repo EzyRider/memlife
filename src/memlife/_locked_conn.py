@@ -21,7 +21,7 @@ class _LockedCursor:
     body raises.
     """
 
-    __slots__ = ("_lock", "_cur")
+    __slots__ = ("_cur", "_lock")
 
     def __init__(self, lock: threading.RLock, cur: sqlite3.Cursor):
         self._lock = lock
@@ -60,7 +60,7 @@ class _LockedConn:
     For multi-statement atomicity, use MemoryStore.transaction().
     """
 
-    __slots__ = ("_raw", "_lock")
+    __slots__ = ("_lock", "_raw")
 
     def __init__(self, conn: sqlite3.Connection, lock: threading.RLock):
         self._raw = conn

@@ -5,16 +5,16 @@ Extracted from store.py as part of the mixin refactor.
 
 from __future__ import annotations
 
-from memlife._utils import _parse_annotations
 import json
 import logging
 import re
 import time
 import uuid
+
 from memlife._schema import MAX_FACT_CONFIDENCE
+from memlife._utils import _parse_annotations
 from memlife.models import Fact
 from memlife.vectors import cosine, recency_weight
-
 
 logger = logging.getLogger(__name__)
 

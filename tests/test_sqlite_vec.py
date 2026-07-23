@@ -5,7 +5,7 @@ sqlite-vec is not a dependency, so these tests exercise graceful fallback.
 
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder, vec_backend
+from memlife import DummyEmbedder, MemoryConfig, MemoryStore, vec_backend
 
 
 def test_sqlite_vec_not_available_by_default():

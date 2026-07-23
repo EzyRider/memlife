@@ -26,8 +26,8 @@ import asyncio
 from typing import Any
 
 from memlife.config import MemoryConfig
-from memlife.store import MemoryStore
 from memlife.protocols import Embedder
+from memlife.store import MemoryStore
 
 
 class SyncMemoryStore:

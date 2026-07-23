@@ -8,9 +8,9 @@ Good enough for keyword-like similarity, not for real semantic recall.
 
 from __future__ import annotations
 
-import re
 import hashlib
-from typing import Sequence
+import re
+from collections.abc import Sequence
 
 
 class DummyEmbedder:

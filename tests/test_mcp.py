@@ -332,7 +332,7 @@ def test_create_server_embedder_is_dummy(server):
 @pytest.mark.asyncio
 async def test_ollama_session_deferred_creation(tmp_path):
     """Ollama adapters do not create an aiohttp session outside an async context."""
-    from memlife.adapters.ollama import OllamaEmbedder, OllamaChat
+    from memlife.adapters.ollama import OllamaChat, OllamaEmbedder
 
     embedder = OllamaEmbedder(model="dummy")
     chat = OllamaChat(model="dummy")

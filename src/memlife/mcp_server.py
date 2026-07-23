@@ -447,7 +447,7 @@ def create_server(
             reflector = await _get_reflector()
             result = await reflector.reflect(max_episodes=max_episodes)
         except Exception as e:
-            logger.error("Reflection failed: %s", e, exc_info=True)
+            logger.exception("Reflection failed")
             return f"Reflection failed: {e}"
 
         _log_tool_call(
@@ -458,8 +458,7 @@ def create_server(
             f"{len(result.contradictions)} contradictions",
         )
         parts = [
-            "Reflection complete.\n"
-            f"  Episodes reflected: {len(result.episode_ids)}",
+            f"Reflection complete.\n  Episodes reflected: {len(result.episode_ids)}",
             f"  Observations kept:  {len(result.observations)}",
             f"  Hypotheses kept:    {len(result.hypotheses)}",
             f"  Revisions kept:     {len(result.revisions)}",

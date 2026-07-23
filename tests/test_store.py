@@ -2,7 +2,7 @@
 
 import pytest
 
-from memlife import MemoryStore, DummyEmbedder
+from memlife import DummyEmbedder, MemoryStore
 
 
 @pytest.mark.asyncio

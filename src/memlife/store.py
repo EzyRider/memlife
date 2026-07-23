@@ -21,29 +21,32 @@ SQLite file and zero extra services.
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-
-import sqlite3
 
 try:
     import pysqlite3.dbapi2 as _pysqlite3  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - not installed on all interpreters
     _pysqlite3 = None  # type: ignore[misc]
 
-from memlife._locked_conn import _LockedConn
-from memlife._schema import SchemaMixin
-from memlife._runs import RunMixin
-from memlife._gc import GCMixin
-from memlife._triples import TripleMixin
 from memlife._embeddings import EmbedMixin
 from memlife._episodes import EpisodeStore
 from memlife._facts import FactStore
+from memlife._gc import GCMixin
 from memlife._journal import JournalStore
-from memlife.protocols import Embedder
+from memlife._locked_conn import _LockedConn
+from memlife._runs import RunMixin
+from memlife._schema import SchemaMixin
+from memlife._triples import TripleMixin
 from memlife.config import MemoryConfig
-from memlife.namespace import validate_namespace, list_namespaces, warn_if_cloud_sync_path
+from memlife.namespace import (
+    list_namespaces,
+    validate_namespace,
+    warn_if_cloud_sync_path,
+)
+from memlife.protocols import Embedder
 from memlife.vector_backends import create_vector_backend
 
 logger = logging.getLogger(__name__)
@@ -194,8 +197,8 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
                 if hasattr(raw, "enable_load_extension") and hasattr(raw, "load_extension"):
                     return raw, _pysqlite3
                 raw.close()
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as exc:  # pragma: no cover
+                logger.debug("pysqlite3 fallback failed: %s", exc)
         return sqlite3.connect(db_path, check_same_thread=False), sqlite3
 
     @contextmanager
@@ -216,7 +219,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
             self._conn = None
 
     # MF-016: context manager support for clean resource handling.
-    def __enter__(self) -> "MemoryStore":
+    def __enter__(self) -> MemoryStore:  # noqa: PYI034
         return self
 
     @classmethod
@@ -224,7 +227,7 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         """Return the names of existing namespace directories under data_dir."""
         return list_namespaces(data_dir)
 
-    def switch_namespace(self, new_namespace: str) -> "MemoryStore":
+    def switch_namespace(self, new_namespace: str) -> MemoryStore:
         """Return a new store instance for a different namespace.
 
         The new store reuses the current embedder and the same config class,

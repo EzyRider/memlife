@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder
+from memlife import DummyEmbedder, MemoryConfig, MemoryStore
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ import os
 import pytest
 
 from memlife import MemoryConfig, MemoryStore
-from memlife.adapters.ollama import OllamaEmbedder, OllamaChat
+from memlife.adapters.ollama import OllamaChat, OllamaEmbedder
 
 
 def _ollama_reachable():

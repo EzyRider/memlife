@@ -1,7 +1,8 @@
 """Tests for the unified retrieval system."""
 
-import pytest
 import time
+
+import pytest
 
 from memlife import MemoryConfig, MemoryStore, retrieve
 

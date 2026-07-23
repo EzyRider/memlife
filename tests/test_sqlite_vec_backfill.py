@@ -10,7 +10,7 @@ import sqlite3
 
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder, vec_backend
+from memlife import DummyEmbedder, MemoryConfig, MemoryStore, vec_backend
 
 
 def _extension_loading_available() -> bool:

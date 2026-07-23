@@ -8,7 +8,6 @@ Each dimension becomes one bit (positive = 1, negative = 0), giving a
 from __future__ import annotations
 
 
-
 def binarize(vec: list[float]) -> bytes:
     """Convert a float vector into a compact bit-packed byte string."""
     if not vec:

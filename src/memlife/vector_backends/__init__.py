@@ -14,11 +14,11 @@ from memlife.vector_backends.json_backend import JsonVectorBackend
 from memlife.vector_backends.sqlite_vec_backend import SqliteVecBackend
 
 __all__ = [
+    "BinaryVectorBackend",
+    "JsonVectorBackend",
+    "SqliteVecBackend",
     "VectorBackend",
     "VectorSearchResult",
-    "JsonVectorBackend",
-    "BinaryVectorBackend",
-    "SqliteVecBackend",
     "create_vector_backend",
 ]
 

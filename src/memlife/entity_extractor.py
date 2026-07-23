@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import re
 
-
 # Default blocklist: common words that are capitalised by accident (start of
 # sentence) or are too generic to be useful entities.
 DEFAULT_BLOCKLIST: frozenset[str] = frozenset({
@@ -29,17 +28,17 @@ DEFAULT_BLOCKLIST: frozenset[str] = frozenset({
     "did", "will", "would", "could", "should", "may", "might", "must", "shall",
     "can", "need", "dare", "ought", "used", "a", "an", "the", "and", "but",
     "or", "yet", "so", "if", "because", "although", "though", "while", "where",
-    "when", "after", "before", "until", "unless", "since", "although", "however",
+    "when", "after", "before", "until", "unless", "since", "however",
     "therefore", "thus", "hence", "moreover", "furthermore", "nevertheless",
     "meanwhile", "otherwise", "instead", "besides", "also", "too", "very",
-    "just", "only", "even", "still", "already", "yet", "once", "twice",
+    "just", "only", "even", "still", "already", "once", "twice",
     "here", "there", "everywhere", "somewhere", "nowhere", "anywhere",
     "today", "tomorrow", "yesterday", "now", "then", "soon", "later",
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
     "ten", "first", "second", "third", "last", "next", "previous", "such",
     "what", "which", "who", "whom", "whose", "why", "how", "all", "each",
     "every", "both", "few", "more", "most", "other", "some", "many", "several",
-    "no", "not", "none", "any", "every", "each", "own", "same", "different",
+    "no", "not", "none", "any", "own", "same", "different",
     # Common sentence-start words that are not entities.
     "plan", "build", "create", "make", "use", "work", "run", "test", "fix",
     "add", "update", "remove", "delete", "write", "read", "check", "get",
@@ -131,17 +130,16 @@ def extract_entities(
     # 2. Known allowlist terms (case-insensitive) that may appear in plain text.
     lower_text = text.lower()
     for term in allow:
-        if term in lower_text and term not in block:
-            if term not in seen:
-                seen.add(term)
-                # Recover original casing from the text for the alias.
-                m = re.search(
-                    re.escape(term),
-                    text,
-                    flags=re.IGNORECASE,
-                )
-                alias = m.group(0) if m else term
-                results.append((term, alias))
+        if term in lower_text and term not in block and term not in seen:
+            seen.add(term)
+            # Recover original casing from the text for the alias.
+            m = re.search(
+                re.escape(term),
+                text,
+                flags=re.IGNORECASE,
+            )
+            alias = m.group(0) if m else term
+            results.append((term, alias))
 
     # 3. Standalone acronyms not already captured by the capitalised-phrase pass.
     for match in re.finditer(r"\b[A-Z]{2,5}\b", text):

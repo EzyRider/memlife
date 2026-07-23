@@ -5,15 +5,15 @@ Extracted from store.py as part of the mixin refactor.
 
 from __future__ import annotations
 
-from memlife._utils import _parse_annotations
 import json
 import logging
 import time
 import uuid
+
+from memlife._utils import _parse_annotations
+from memlife.config import MemoryConfig
 from memlife.models import JournalEntry
 from memlife.vectors import recency_weight
-from memlife.config import MemoryConfig
-
 
 logger = logging.getLogger(__name__)
 

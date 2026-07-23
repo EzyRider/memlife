@@ -59,7 +59,7 @@ def fuse_candidates(
     rankings: list[list[tuple[str, float]]] = []
     candidate_map: dict[str, _RecallSignals] = {}
 
-    for _voice_name, voice_candidates in voices.items():
+    for voice_candidates in voices.values():
         ranking: list[tuple[str, float]] = []
         for c in voice_candidates:
             item_id = getattr(c.item, "id", "")

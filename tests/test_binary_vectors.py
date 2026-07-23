@@ -2,13 +2,13 @@
 
 import pytest
 
-from memlife import MemoryConfig, MemoryStore, DummyEmbedder
+from memlife import DummyEmbedder, MemoryConfig, MemoryStore
 from memlife.binary_vectors import (
     binarize,
+    cosine_from_binary,
     debinarize,
     hamming_distance,
     hamming_similarity,
-    cosine_from_binary,
 )
 
 

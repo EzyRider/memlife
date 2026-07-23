@@ -13,7 +13,6 @@ import uuid
 
 from memlife._schema import MAX_FACT_CONFIDENCE
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -160,9 +159,10 @@ class TripleMixin:
         ):
             canonical = self._ensure_entity(canonical)
             # Store an alias if the original casing differs from the canonical.
-            if alias and alias != canonical:
-                if self.add_entity_alias(canonical, alias, commit=False):
-                    changed = True
+            if alias and alias != canonical and self.add_entity_alias(
+                canonical, alias, commit=False
+            ):
+                changed = True
             if mentions_enabled:
                 self.store_mention_triple(
                     source_kind, source_id, canonical, confidence, commit=False

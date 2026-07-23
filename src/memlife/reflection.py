@@ -31,10 +31,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from memlife.store import MemoryStore
-from memlife.config import MemoryConfig
-from memlife.vectors import cosine
 from memlife import memorias
+from memlife.config import MemoryConfig
+from memlife.store import MemoryStore
+from memlife.vectors import cosine
 
 logger = logging.getLogger(__name__)
 

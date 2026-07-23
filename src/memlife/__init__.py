@@ -15,64 +15,64 @@ Quickstart:
 """
 
 from memlife.config import MemoryConfig
-from memlife.models import Episode, Fact, JournalEntry, Metrics
-from memlife.protocols import ChatCallable, Embedder
 from memlife.embedders import DummyEmbedder
 from memlife.llm import DummyChat
-from memlife.reflection import Reflector, ReflectionResult
+from memlife.models import Episode, Fact, JournalEntry, Metrics
+from memlife.protocols import ChatCallable, Embedder
+from memlife.reflection import ReflectionResult, Reflector
 from memlife.store import MemoryStore
 from memlife.sync_store import SyncMemoryStore
-from memlife.vectors import cosine, recency_weight
 from memlife.vector_backends import (
+    BinaryVectorBackend,
+    JsonVectorBackend,
+    SqliteVecBackend,
     VectorBackend,
     VectorSearchResult,
-    JsonVectorBackend,
-    BinaryVectorBackend,
-    SqliteVecBackend,
     create_vector_backend,
 )
+from memlife.vectors import cosine, recency_weight
 
 __version__ = "0.6.8"
 
 __all__ = [
-    "MemoryStore",
-    "SyncMemoryStore",
-    "MemoryConfig",
-    "Reflector",
-    "ReflectionResult",
+    "BinaryVectorBackend",
+    "ChatCallable",
+    "DummyChat",
+    "DummyEmbedder",
+    "Embedder",
     "Episode",
     "Fact",
     "JournalEntry",
+    "JsonVectorBackend",
+    "MemoryConfig",
+    "MemoryStore",
     "Metrics",
-    "Embedder",
-    "ChatCallable",
-    "DummyEmbedder",
-    "DummyChat",
+    "NamespaceError",
+    "ReflectionResult",
+    "Reflector",
+    "SqliteVecBackend",
+    "SyncMemoryStore",
+    "VectorBackend",
+    "VectorSearchResult",
+    "binary_vectors",
     "cosine",
+    "create_vector_backend",
+    "export_jsonl",
+    "import_jsonl",
+    "list_namespaces",
+    "memorias",
+    "polyphonic",
     "recency_weight",
     "retrieve",
     "run_gc",
-    "export_jsonl",
-    "import_jsonl",
-    "vec_backend",
-    "binary_vectors",
-    "memorias",
-    "polyphonic",
-    "NamespaceError",
     "validate_namespace",
-    "list_namespaces",
-    "VectorBackend",
-    "VectorSearchResult",
-    "JsonVectorBackend",
-    "BinaryVectorBackend",
-    "SqliteVecBackend",
-    "create_vector_backend",
+    "vec_backend",
 ]
 
 # Convenience imports
-from memlife.retrieval import retrieve
+from memlife import memorias
 from memlife.gc import run_gc
 from memlife.io import export_jsonl, import_jsonl
-from memlife import memorias
-from memlife.namespace import NamespaceError, validate_namespace, list_namespaces
+from memlife.namespace import NamespaceError, list_namespaces, validate_namespace
+from memlife.retrieval import retrieve
 

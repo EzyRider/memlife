@@ -10,9 +10,9 @@ import logging
 import re
 import time
 import uuid
+
 from memlife.models import Episode, JournalEntry
 from memlife.vectors import recency_weight
-
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +103,12 @@ class EpisodeStore:
     def _format_gap(self, gap_hours: float) -> str:
         """Human-readable gap marker label for a time gap."""
         if gap_hours < 48:
-            return f"[gap: {int(round(gap_hours))} hours passed]"
+            return f"[gap: {round(gap_hours)} hours passed]"
         days = gap_hours / 24.0
         if days < 60:
-            return f"[gap: {int(round(days))} days passed]"
+            return f"[gap: {round(days)} days passed]"
         months = days / 30.44
-        return f"[gap: {int(round(months))} months passed]"
+        return f"[gap: {round(months)} months passed]"
 
     async def embed_episode(self, ep_id: str) -> None:
         """Compute and store an embedding for an episode's task+summary."""

@@ -2,7 +2,7 @@
 
 import pytest
 
-from memlife import Reflector, DummyChat
+from memlife import DummyChat, Reflector
 
 
 @pytest.mark.asyncio

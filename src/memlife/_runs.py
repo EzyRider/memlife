@@ -10,7 +10,6 @@ import logging
 import time
 import uuid
 
-
 logger = logging.getLogger(__name__)
 
 # Cap on trace events stored per run (oldest are dropped beyond this).

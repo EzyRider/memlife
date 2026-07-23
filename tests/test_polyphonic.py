@@ -2,7 +2,7 @@
 
 import pytest
 
-from memlife import MemoryConfig, DummyEmbedder, polyphonic
+from memlife import DummyEmbedder, MemoryConfig, polyphonic
 from memlife.models import Fact
 from memlife.retrieval import _RecallSignals
 
@@ -37,7 +37,7 @@ def test_fuse_candidates_reorders_by_rrf():
         "text": [_fact("b", "beta", 0.95), _fact("a", "alpha", 0.85)],
     }
     fused = polyphonic.fuse_candidates(voices, cfg)
-    ids = [getattr(c.item, "id") for c in fused]
+    ids = [c.item.id for c in fused]
     assert len(ids) == 2
     assert fused[0].score >= fused[1].score
 
@@ -51,7 +51,7 @@ def test_fuse_candidates_single_voice_is_identity():
     cfg = MemoryConfig()
     voices = {"text": [_fact("x", "xray", 0.5), _fact("y", "yankee", 0.4)]}
     fused = polyphonic.fuse_candidates(voices, cfg)
-    assert [getattr(c.item, "id") for c in fused] == ["x", "y"]
+    assert [c.item.id for c in fused] == ["x", "y"]
 
 
 @pytest.mark.asyncio

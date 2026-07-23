@@ -3,7 +3,6 @@
 import pytest
 
 
-
 @pytest.mark.asyncio
 async def test_episode_to_fact(store):
     """An episode can be stored, then a fact extracted from it."""
@@ -63,7 +62,7 @@ async def test_journal_decay(store):
 @pytest.mark.asyncio
 async def test_full_lifecycle(store, config):
     """Full lifecycle: episode → fact → reflection → GC."""
-    from memlife import Reflector, DummyChat, run_gc
+    from memlife import DummyChat, Reflector, run_gc
     
     # 1. Store an episode
     ep_id = store.remember(

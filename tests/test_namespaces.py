@@ -10,7 +10,6 @@ import pytest
 
 from memlife import MemoryConfig, MemoryStore
 
-
 pytestmark = pytest.mark.anyio
 
 

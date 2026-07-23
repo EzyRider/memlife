@@ -2,7 +2,7 @@
 
 import pytest
 
-from memlife import SyncMemoryStore, MemoryConfig, DummyEmbedder
+from memlife import DummyEmbedder, MemoryConfig, SyncMemoryStore
 
 
 @pytest.fixture

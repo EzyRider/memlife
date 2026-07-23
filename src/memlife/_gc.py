@@ -560,8 +560,8 @@ class GCMixin:
         try:
             journal_mode = self.conn.execute("PRAGMA journal_mode").fetchone()[0]
             busy_timeout = self.conn.execute("PRAGMA busy_timeout").fetchone()[0]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("PRAGMA metrics unavailable: %s", exc)
 
         last_reflection = summary.get("last_reflection_at")
         if last_reflection is not None:

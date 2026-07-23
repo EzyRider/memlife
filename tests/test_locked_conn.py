@@ -9,7 +9,7 @@ from queue import Queue
 
 import pytest
 
-from memlife._locked_conn import _LockedConn, _LockedCursor
+from memlife._locked_conn import _LockedConn
 
 
 class _TrackingRLock:
@@ -68,10 +68,9 @@ class TestLockedCursor:
         raw = sqlite3.connect(":memory:")
         conn = _LockedConn(raw, lock)
 
-        with pytest.raises(RuntimeError):
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError), conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            raise RuntimeError("boom")
         assert not lock.is_held
 
     def test_cursor_blocks_concurrent_access(self):

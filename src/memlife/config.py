@@ -8,7 +8,6 @@ from pathlib import Path
 
 from memlife.namespace import validate_namespace
 
-
 logger = logging.getLogger(__name__)
 
 # Vector backends supported by memlife.
@@ -307,7 +306,7 @@ class MemoryConfig:
         return "json"
 
     @classmethod
-    def from_env(cls) -> "MemoryConfig":
+    def from_env(cls) -> MemoryConfig:
         """Load from environment variables with MEMLIFE_ prefix."""
         import os
 

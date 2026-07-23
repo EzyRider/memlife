@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import time
-import base64
 from dataclasses import dataclass, field
 
 
@@ -49,7 +49,7 @@ class Episode:
     is_gap_marker: bool = False
 
     @classmethod
-    def from_row(cls, row: tuple) -> "Episode":
+    def from_row(cls, row: tuple) -> Episode:
         # Tolerate rows from pre-migration schemas that lack embedding_json
         # or is_gap_marker.
         if len(row) >= 8:

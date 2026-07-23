@@ -28,7 +28,7 @@ class EmbedMixin:
     embedder: object
     embedding_model_name: str
     _embed_failures: int
-    vector_backend: "VectorBackend"
+    vector_backend: VectorBackend
 
     def _serialize_vec(self, vec: list[float]) -> str:
         """Serialize a float vector for storage."""
@@ -213,7 +213,7 @@ class EmbedMixin:
                     self._embed_failures += 1
                     return None
                 self._embed_failures = 0  # reset on success
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._embed_failures += 1
             logger.warning(
                 "embed_texts failed (attempt #%d, falling back to keyword recall): %s",

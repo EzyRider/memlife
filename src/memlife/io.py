@@ -10,7 +10,6 @@ import json
 from memlife.store import MemoryStore
 
 
-
 def export_jsonl(store: MemoryStore, path: str) -> dict:
     """Export all memory data to a JSONL file.
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 
-
 logger = logging.getLogger(__name__)
 
 # Maximum confidence allowed for a stored fact. 1.0 is reserved: it implies
@@ -266,8 +265,8 @@ class SchemaMixin:
         try:
             page_size = self.conn.execute("PRAGMA page_size").fetchone()[0]
             page_count = self.conn.execute("PRAGMA page_count").fetchone()[0]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("PRAGMA page metrics unavailable: %s", exc)
 
         return {
             "sqlite_version": sqlite_version,

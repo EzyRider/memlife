@@ -8,7 +8,7 @@ test to surface parsing/critic/DB interactions in CI.
 
 import pytest
 
-from memlife import MemoryStore, MemoryConfig, DummyEmbedder, Reflector, DummyChat
+from memlife import DummyChat, DummyEmbedder, MemoryConfig, MemoryStore, Reflector
 
 
 @pytest.mark.asyncio

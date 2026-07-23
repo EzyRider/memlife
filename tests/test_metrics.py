@@ -6,7 +6,6 @@ import pytest
 
 from memlife import MemoryConfig, MemoryStore, Metrics, SyncMemoryStore
 
-
 pytestmark = pytest.mark.anyio
 
 
