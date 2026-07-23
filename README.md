@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.9**
+**Current version: 0.6.10**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -225,9 +225,13 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
 
-## What's new in 0.6.9
+## What's new in 0.6.10
 
 - **Minimum Python version is now 3.11.** memlife no longer supports Python 3.10, so the `typing_extensions` compatibility shim added in 0.6.8 has been removed.
+
+## What's new in 0.6.9
+
+- (Superseded by 0.6.10; the Python 3.11 minimum is now documented above.)
 
 ## What's new in 0.6.8
 

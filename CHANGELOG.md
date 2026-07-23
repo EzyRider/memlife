@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.9] - 2026-07-24
+## [0.6.10] - 2026-07-24
 
 ### Changed
 
 - **Minimum Python version raised to 3.11.** memlife no longer supports Python
   3.10. The `typing_extensions` fallback for `typing.Self` and the conditional
   dependency added in 0.6.8 have been removed.
+
+## [0.6.9] - 2026-07-24
+
+### Changed
+
+- (Superseded by 0.6.10; the Python 3.11 minimum is now documented in 0.6.10.)
 
 ## [0.6.8] - 2026-07-24
 
