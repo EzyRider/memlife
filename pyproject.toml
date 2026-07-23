@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memlife"
-version = "0.6.8"
+version = "0.6.9"
 description = "Memory that degrades gracefully — four-tier lifecycle memory for AI agents"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
+dependencies = [
+    "typing_extensions>=4.0 ; python_version<'3.11'",
+]
 authors = [{name = "EzyRider", email = "ezyrider70@gmail.com"}]
 keywords = ["memory", "ai", "agent", "lifecycle", "decay", "reflection", "mcp"]
 classifiers = [

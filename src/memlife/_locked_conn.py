@@ -9,7 +9,11 @@ from __future__ import annotations
 import sqlite3
 import threading
 from types import TracebackType
-from typing import Self
+
+try:
+    from typing import Self
+except ImportError:  # pragma: no cover
+    from typing_extensions import Self
 
 
 class _LockedCursor:

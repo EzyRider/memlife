@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-07-24
+
+### Fixed
+
+- Python 3.10 compatibility: `_LockedCursor.__enter__` no longer imports `Self`
+  directly from `typing` (Python 3.11+ only). It now falls back to
+  `typing_extensions.Self` on Python 3.10, with `typing_extensions>=4.0` added
+  as a conditional dependency for `python_version<'3.11'`.
+
 ## [0.6.8] - 2026-07-24
 
 ### Fixed
