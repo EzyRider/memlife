@@ -194,7 +194,7 @@ class Reflector:
             return await asyncio.wait_for(
                 self._reflect_inner(since, max_episodes), timeout=self.total_timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Reflection exceeded total timeout of %.1fs; abandoning pass.", self.total_timeout
             )
@@ -253,7 +253,7 @@ class Reflector:
             raw = await asyncio.wait_for(
                 self.model_chat.chat(prompt, self.model_name), timeout=self.timeout
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             logger.warning(
                 "Reflection generation timed out after %.1fs: %s", self.timeout, exc
             )
@@ -620,7 +620,7 @@ class Reflector:
                 ),
                 timeout=self.timeout,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             logger.warning("Reflection critic timed out after %.1fs: %s", self.timeout, exc)
             return parsed
         except Exception as exc:

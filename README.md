@@ -225,15 +225,15 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
 
+## What's new in 0.6.9
+
+- **Minimum Python version is now 3.11.** memlife no longer supports Python 3.10, so the `typing_extensions` compatibility shim added in 0.6.8 has been removed.
+
 ## What's new in 0.6.8
 
 - Hardened `_LockedConn` thread-safety contract: cursors are now returned as context-managed `_LockedCursor` proxies that hold the store lock for their entire lifetime, and `row_factory`, `isolation_level`, and `text_factory` access is serialised through the same lock.
 - Added PRAGMA allowlist validation in `MemoryConfig` and `MemoryStore._set_pragma()` so `journal_mode` and other PRAGMA values are checked before any SQL interpolation.
 - Audited remaining cursor-iteration sites in `_gc.py`, `_triples.py`, and `_schema.py` to use explicit cursors or `.fetchall()` so cursors never outlive the lock.
-
-## What's new in 0.6.9
-
-- Fixed Python 3.10 compatibility: `_LockedCursor.__enter__` no longer imports `Self` directly from `typing` (available only in Python 3.11+). It now falls back to `typing_extensions.Self` on Python 3.10, with `typing_extensions>=4.0` added as a conditional dependency for `python_version<'3.11'`.
 
 ## What's new in 0.6.7
 
