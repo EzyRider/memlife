@@ -393,24 +393,31 @@ class GCMixin:
         # We stream rows directly from the cursor instead of fetchall() so
         # memory usage stays flat for large databases.
         referenced: set[tuple[str, str]] = set()
-        for model, content in self.conn.execute(
-            "SELECT embedding_model, content FROM facts WHERE embedding_json != ''"
-        ):
-            if model:
-                referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
-        for model, content in self.conn.execute(
-            "SELECT embedding_model, content FROM journal "
-            "WHERE embedding_json != '' AND type != 'contradiction'"
-        ):
-            if model:
-                referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
-        for model, task, summary in self.conn.execute(
-            "SELECT embedding_model, task, summary FROM episodes "
-            "WHERE embedding_json != '' AND is_gap_marker = 0"
-        ):
-            if model:
-                text = f"{task}\n{summary or ''}".strip()
-                referenced.add((model, hashlib.sha256(text.encode("utf-8")).hexdigest()))
+        # HF-001: hold the cursor under the lock for the whole iteration.
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT embedding_model, content FROM facts WHERE embedding_json != ''"
+            )
+            for model, content in cur:
+                if model:
+                    referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT embedding_model, content FROM journal "
+                "WHERE embedding_json != '' AND type != 'contradiction'"
+            )
+            for model, content in cur:
+                if model:
+                    referenced.add((model, hashlib.sha256(content.encode("utf-8")).hexdigest()))
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT embedding_model, task, summary FROM episodes "
+                "WHERE embedding_json != '' AND is_gap_marker = 0"
+            )
+            for model, task, summary in cur:
+                if model:
+                    text = f"{task}\n{summary or ''}".strip()
+                    referenced.add((model, hashlib.sha256(text.encode("utf-8")).hexdigest()))
 
         # Delete cache rows whose (model_name, text_hash) is not referenced.
         # We do this in batches to avoid a huge transaction for large caches.

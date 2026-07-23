@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.7**
+**Current version: 0.6.8**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -224,6 +224,12 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > checksum errors. Use a local, non-synced directory. If you still see locking
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
+
+## What's new in 0.6.8
+
+- Hardened `_LockedConn` thread-safety contract: cursors are now returned as context-managed `_LockedCursor` proxies that hold the store lock for their entire lifetime, and `row_factory`, `isolation_level`, and `text_factory` access is serialised through the same lock.
+- Added PRAGMA allowlist validation in `MemoryConfig` and `MemoryStore._set_pragma()` so `journal_mode` and other PRAGMA values are checked before any SQL interpolation.
+- Audited remaining cursor-iteration sites in `_gc.py`, `_triples.py`, and `_schema.py` to use explicit cursors or `.fetchall()` so cursors never outlive the lock.
 
 ## What's new in 0.6.7
 

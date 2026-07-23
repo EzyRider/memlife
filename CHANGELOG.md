@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-07-24
+
+### Fixed
+
+- `_LockedConn.cursor()` now returns a context-managed `_LockedCursor` proxy
+  that acquires the store lock on entry, closes the real cursor on exit, and
+  releases the lock even if the iteration body raises. This prevents cursors
+  from outliving the lock that serialises access to the underlying SQLite
+  connection.
+- `_LockedConn` now wraps `row_factory`, `isolation_level`, and `text_factory`
+  getters/setters under the same reentrant lock used for `execute`/`commit`,
+  removing a latent race when connection-level attributes are mutated from
+  multiple threads.
+- `MemoryConfig.validate()` and `MemoryStore._set_pragma()` now validate
+  PRAGMA names and values against explicit allowlists before any f-string
+  interpolation, closing an SQL-injection vector via `sqlite_journal_mode` or
+  similar config fields.
+
+### Changed
+
+- Audited cursor-iteration sites in `_gc.py`, `_triples.py`, and `_schema.py`
+  to use explicit `with self.conn.cursor()` cursors or `.fetchall()`, ensuring
+  no cursor is iterated while the lock is released.
+- Added `tests/test_locked_conn.py` covering `_LockedCursor` context-manager
+  behaviour and locked `row_factory` access under contention.
+- Added `tests/test_config.py` coverage for PRAGMA name/value validation.
+
 ## [0.6.7] - 2026-07-18
 
 ### Fixed

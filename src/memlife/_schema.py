@@ -287,21 +287,21 @@ class SchemaMixin:
         the reflection-queue unique index is preceded by a dedup of any
         pre-existing duplicate ``episode_id`` rows (the old code allowed dupes).
         """
-        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)")}
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)").fetchall()}
         if "embedding_json" not in cols:
             self.conn.execute("ALTER TABLE episodes ADD COLUMN embedding_json TEXT DEFAULT ''")
-        jcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(journal)")}
+        jcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(journal)").fetchall()}
         if "superseded_by" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN superseded_by TEXT DEFAULT ''")
         if "embedding_json" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN embedding_json TEXT DEFAULT ''")
         if "last_detected" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN last_detected INTEGER DEFAULT 0")
-        rcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(agent_runs)")}
+        rcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(agent_runs)").fetchall()}
         if "trace_json" not in rcols:
             self.conn.execute("ALTER TABLE agent_runs ADD COLUMN trace_json TEXT DEFAULT '[]'")
 
-        scols = {r["name"] for r in self.conn.execute("PRAGMA table_info(sessions)")}
+        scols = {r["name"] for r in self.conn.execute("PRAGMA table_info(sessions)").fetchall()}
         if "rolling_summary" not in scols:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN rolling_summary TEXT DEFAULT ''")
 
@@ -342,7 +342,7 @@ class SchemaMixin:
         )
 
         # Reflection audit table: added in 0.5.0.  Idempotent for existing DBs.
-        rpass_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(reflection_passes)")}
+        rpass_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(reflection_passes)").fetchall()}
         if not rpass_cols:
             self.conn.executescript("""
                 CREATE TABLE IF NOT EXISTS reflection_passes (
@@ -366,7 +366,7 @@ class SchemaMixin:
         # a backfill. Existing rows get '' (unknown — treated as "needs
         # backfill" if a model name is configured).
         for table in ("facts", "journal", "episodes"):
-            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if "embedding_model" not in cols:
                 self.conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN embedding_model TEXT DEFAULT ''"
@@ -374,7 +374,7 @@ class SchemaMixin:
 
         # MV2-003 / MV2-010: ensure temporal_triples, entity, and provenance
         # tables exist in existing databases.
-        tcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(temporal_triples)")}
+        tcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(temporal_triples)").fetchall()}
         if not tcols:
             self.conn.executescript("""
                 CREATE TABLE IF NOT EXISTS temporal_triples (
@@ -448,24 +448,24 @@ class SchemaMixin:
             """)
 
         # MV2-008: ensure episode gap-marker flag exists in existing databases.
-        ecols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)")}
+        ecols = {r["name"] for r in self.conn.execute("PRAGMA table_info(episodes)").fetchall()}
         if "is_gap_marker" not in ecols:
             self.conn.execute("ALTER TABLE episodes ADD COLUMN is_gap_marker INTEGER DEFAULT 0")
 
         # MV2-004: ensure annotations_json columns exist on facts and journal.
-        fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(facts)")}
+        fcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(facts)").fetchall()}
         if "annotations_json" not in fcols:
             self.conn.execute("ALTER TABLE facts ADD COLUMN annotations_json TEXT DEFAULT '[]'")
         # Re-read journal columns: earlier migration steps may have just added
         # columns, so the jcols snapshot from the start of _migrate() is stale.
-        jcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(journal)")}
+        jcols = {r["name"] for r in self.conn.execute("PRAGMA table_info(journal)").fetchall()}
         if "annotations_json" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN annotations_json TEXT DEFAULT '[]'")
         if "links_json" not in jcols:
             self.conn.execute("ALTER TABLE journal ADD COLUMN links_json TEXT DEFAULT '[]'")
 
         # 0.6.0: ensure embedding_cache table exists in existing databases.
-        ccols = {r["name"] for r in self.conn.execute("PRAGMA table_info(embedding_cache)")}
+        ccols = {r["name"] for r in self.conn.execute("PRAGMA table_info(embedding_cache)").fetchall()}
         if not ccols:
             self.conn.executescript("""
                 CREATE TABLE IF NOT EXISTS embedding_cache (

@@ -14,6 +14,26 @@ logger = logging.getLogger(__name__)
 # Vector backends supported by memlife.
 VECTOR_BACKENDS = frozenset({"json", "binary", "sqlite_vec", "sqlite-vec"})
 
+# HF-003: PRAGMA names that memlife is allowed to set at runtime.
+# SQLite PRAGMA syntax does not support bound parameters for pragma names, so
+# these are validated before any f-string interpolation.
+ALLOWED_PRAGMA_NAMES = frozenset({
+    "journal_mode",
+    "synchronous",
+    "foreign_keys",
+    "busy_timeout",
+    "cache_size",
+    "temp_store",
+    "mmap_size",
+})
+
+# HF-003: validated value sets for string-valued PRAGMAs.
+ALLOWED_PRAGMA_VALUES = {
+    "journal_mode": frozenset({"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"}),
+    "synchronous": frozenset({"OFF", "NORMAL", "FULL", "EXTRA"}),
+    "temp_store": frozenset({"DEFAULT", "FILE", "MEMORY"}),
+}
+
 
 @dataclass
 class MemoryConfig:
@@ -189,6 +209,13 @@ class MemoryConfig:
         if self.sqlite_busy_timeout_ms < 0:
             raise ValueError("sqlite_busy_timeout_ms must be >= 0")
 
+        # HF-003: validate PRAGMA names and values at config construction time
+        # so misconfiguration fails fast at startup, not at the first execute.
+        # Config field names prefix with "sqlite_" / suffix with "_ms"; the
+        # actual PRAGMA names are shorter.
+        self._validate_pragma("journal_mode", self.sqlite_journal_mode)
+        self._validate_pragma("busy_timeout", self.sqlite_busy_timeout_ms)
+
         # Decay / threshold invariants.
         if not (0 < self.recency_halflife_days):
             raise ValueError("recency_halflife_days must be > 0")
@@ -207,6 +234,44 @@ class MemoryConfig:
         # (lifecycle GC still runs).
         if self.embedding_cache_max_mb < 0:
             raise ValueError("embedding_cache_max_mb must be >= 0")
+
+    @staticmethod
+    def _validate_pragma(name: str, value: object) -> None:
+        """Fail fast on a PRAGMA name or value that would reach raw SQL.
+
+        HF-003: SQLite PRAGMA syntax does not support bound parameters for
+        pragma names, so every name and string value is checked against an
+        explicit allowlist before any f-string interpolation.
+        """
+        if name not in ALLOWED_PRAGMA_NAMES:
+            raise ValueError(f"unsupported PRAGMA name: {name!r}")
+
+        # Integer-valued pragmas (busy_timeout, cache_size, mmap_size)
+        # accept int; foreign_keys accepts 0/1 or bool.
+        if name in ("busy_timeout", "cache_size", "mmap_size"):
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(
+                    f"PRAGMA {name} requires an integer value, got {value!r}"
+                )
+            return
+        if name == "foreign_keys":
+            if not isinstance(value, (int, bool)):
+                raise ValueError(
+                    f"PRAGMA {name} requires an integer/boolean value, got {value!r}"
+                )
+            return
+
+        allowed = ALLOWED_PRAGMA_VALUES.get(name)
+        if allowed is not None:
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"PRAGMA {name} requires a string value, got {value!r}"
+                )
+            if value.upper() not in allowed:
+                raise ValueError(
+                    f"invalid value for PRAGMA {name}: {value!r}. "
+                    f"Allowed: {', '.join(sorted(allowed))}"
+                )
 
     def resolved_vector_backend(self) -> str:
         """Return the effective vector backend name.

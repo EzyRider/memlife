@@ -610,13 +610,14 @@ class TripleMixin:
         """
         phrases: list[tuple[str, str]] = []
         seen: set[str] = set()
-        for (canonical,) in self.conn.execute(
-            "SELECT canonical_name FROM entities"
-        ):
-            key = canonical.lower()
-            if key not in seen:
-                seen.add(key)
-                phrases.append((canonical, canonical))
+        # HF-001: hold the cursor under the lock for the whole iteration.
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT canonical_name FROM entities")
+            for (canonical,) in cur:
+                key = canonical.lower()
+                if key not in seen:
+                    seen.add(key)
+                    phrases.append((canonical, canonical))
         rows = self.conn.execute(
             "SELECT alias, canonical_name FROM entity_aliases"
         ).fetchall()

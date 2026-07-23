@@ -527,8 +527,8 @@ design decisions → unverified audit items → documentation → structural
 
 ### 0.6.8 hotfix — thread safety & PRAGMA hardening
 
-**Status:** Scope agreed, ready to implement. Point release, no design
-changes bundled in.
+**Status:** Implemented and tested (283 passed, 2 skipped). Pending
+version bump, CHANGELOG entry, and release tag.
 
 Three confirmed issues from real consumer usage (Ingrid's TUI, MCP server,
 ZeroClaw all poke at `_LockedConn` from multiple threads). The public API

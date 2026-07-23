@@ -148,11 +148,11 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
                 if self._conn is None:
                     raw, sqlite_mod = self._connect(self.db_path)
                     raw.row_factory = sqlite_mod.Row
-                    raw.execute(
-                        f"PRAGMA journal_mode={self.config.sqlite_journal_mode}"
+                    self._set_pragma(
+                        raw, "journal_mode", self.config.sqlite_journal_mode
                     )
-                    raw.execute(
-                        f"PRAGMA busy_timeout={self.config.sqlite_busy_timeout_ms}"
+                    self._set_pragma(
+                        raw, "busy_timeout", self.config.sqlite_busy_timeout_ms
                     )
                     # Wrap in _LockedConn so every subsequent execute/commit
                     # serialises through the RLock. This makes the shared
@@ -161,6 +161,19 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
                     self._init_schema()
                     self._migrate()
         return self._conn
+
+    @staticmethod
+    def _set_pragma(raw_conn: sqlite3.Connection, name: str, value: object) -> None:
+        """Execute a PRAGMA statement after validating name and value.
+
+        HF-003: SQLite PRAGMA syntax does not support bound parameters for
+        pragma names, so we validate against an explicit allowlist before
+        any f-string interpolation. ``MemoryConfig.validate()`` already checks
+        the configured values at startup; this helper is the runtime guard
+        for any pragma set from code.
+        """
+        MemoryConfig._validate_pragma(name, value)
+        raw_conn.execute(f"PRAGMA {name}={value}")
 
     @staticmethod
     def _connect(db_path: str):

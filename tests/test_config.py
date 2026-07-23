@@ -81,3 +81,50 @@ class TestVectorBackendResolution:
         cfg = MemoryConfig()
         cfg.validate()
         assert cfg.resolved_vector_backend() == "json"
+
+
+class TestPragmaValidation:
+    """HF-003: PRAGMA names and values are validated at config time."""
+
+    @pytest.mark.parametrize("value", ["WAL", "wal", "DELETE", "OFF"])
+    def test_valid_journal_mode_passes(self, value):
+        cfg = MemoryConfig(sqlite_journal_mode=value)
+        cfg.validate()
+        assert cfg.sqlite_journal_mode == value
+
+    @pytest.mark.parametrize("value", ["WAL; DROP TABLE facts; --", "", "wal2"])
+    def test_invalid_journal_mode_raises(self, value):
+        cfg = MemoryConfig(sqlite_journal_mode=value)
+        with pytest.raises(ValueError, match="invalid value for PRAGMA journal_mode"):
+            cfg.validate()
+
+    def test_validate_pragma_rejects_bad_name(self):
+        from memlife.config import MemoryConfig
+
+        with pytest.raises(ValueError, match="unsupported PRAGMA name"):
+            MemoryConfig._validate_pragma("journal_mode2", "WAL")
+
+    def test_validate_pragma_accepts_integer_pragmas(self):
+        from memlife.config import MemoryConfig
+
+        MemoryConfig._validate_pragma("busy_timeout", 5000)
+        MemoryConfig._validate_pragma("cache_size", -2000)
+        MemoryConfig._validate_pragma("mmap_size", 0)
+
+    def test_validate_pragma_rejects_string_for_integer_pragma(self):
+        from memlife.config import MemoryConfig
+
+        with pytest.raises(ValueError, match="PRAGMA busy_timeout requires an integer"):
+            MemoryConfig._validate_pragma("busy_timeout", "5000")
+
+    def test_validate_pragma_accepts_foreign_keys_bool(self):
+        from memlife.config import MemoryConfig
+
+        MemoryConfig._validate_pragma("foreign_keys", True)
+        MemoryConfig._validate_pragma("foreign_keys", 1)
+
+    def test_validate_pragma_rejects_bad_synchronous(self):
+        from memlife.config import MemoryConfig
+
+        with pytest.raises(ValueError, match="invalid value for PRAGMA synchronous"):
+            MemoryConfig._validate_pragma("synchronous", "BROKEN")

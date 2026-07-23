@@ -10,3 +10,4 @@ build/
 *.db-shm
 *.jsonl
 .venv/
+.ingrid_backups/
