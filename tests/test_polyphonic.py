@@ -63,3 +63,29 @@ async def test_polyphonic_config_flag_defaults_off(tmp_path):
     store = MemoryStore(config=cfg, embedder=DummyEmbedder())
     assert store.config.use_polyphonic_recall is False
     store.conn.close()
+
+
+@pytest.mark.asyncio
+async def test_polyphonic_counters_use_source_attribution(store, config):
+    """Voice-hit counters count the dominant voice per fused candidate."""
+    from memlife.retrieval import retrieve
+
+    config.use_polyphonic_recall = True
+    await store.store_fact("User prefers dark mode", confidence=0.9)
+    await store.store_fact("User likes light themes", confidence=0.6)
+    await store.store_fact("User deploys via CI", confidence=0.8)
+    await store.store_fact("User runs on Linux", confidence=0.7)
+
+    await retrieve(store, "dark mode", config)
+
+    total_hits = (
+        store._recall_counters["voice_hits_vector"]
+        + store._recall_counters["voice_hits_text"]
+        + store._recall_counters["voice_hits_source"]
+        + store._recall_counters["voice_hits_veracity"]
+        + store._recall_counters["voice_hits_recency"]
+    )
+    # With a few candidates and polyphonic fusion, the total attributed hits
+    # should equal the number of fused candidates selected (non-zero).
+    assert total_hits > 0
+    assert store._recall_counters["polyphonic_fusion_calls"] == 1

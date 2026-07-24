@@ -128,3 +128,28 @@ class TestPragmaValidation:
 
         with pytest.raises(ValueError, match="invalid value for PRAGMA synchronous"):
             MemoryConfig._validate_pragma("synchronous", "BROKEN")
+
+
+class TestFromEnv:
+    """Environment variable loading must validate before returning."""
+
+    def test_from_env_validates(self, monkeypatch):
+        monkeypatch.setenv("MEMLIFE_NAMESPACE", "valid-ns")
+        cfg = MemoryConfig.from_env()
+        cfg.validate()  # does not raise
+        assert cfg.namespace == "valid-ns"
+
+    def test_from_env_rejects_invalid_namespace(self, monkeypatch):
+        monkeypatch.setenv("MEMLIFE_NAMESPACE", "../bad")
+        with pytest.raises(ValueError):
+            MemoryConfig.from_env()
+
+    def test_from_env_rejects_invalid_journal_mode(self, monkeypatch):
+        monkeypatch.setenv("MEMLIFE_SQLITE_JOURNAL_MODE", "WAL; DROP TABLE facts; --")
+        with pytest.raises(ValueError, match="invalid value for PRAGMA journal_mode"):
+            MemoryConfig.from_env()
+
+    def test_from_env_rejects_negative_busy_timeout(self, monkeypatch):
+        monkeypatch.setenv("MEMLIFE_SQLITE_BUSY_TIMEOUT_MS", "-1")
+        with pytest.raises(ValueError, match="sqlite_busy_timeout_ms must be >= 0"):
+            MemoryConfig.from_env()

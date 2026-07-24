@@ -5,9 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.12] - 2026-07-24
 
-## [0.6.11] - 2026-07-24
+### Changed
+
+- `MemoryConfig.from_env()` now calls `validate()` before returning, so invalid
+  environment configuration fails early with a clear error.
+- Polyphonic recall voice-hit counters now report source attribution (which
+  voice produced each fused candidate) instead of overlap with each voice's
+  top-N.
+- MCP server now supports `--chat-adapter {ollama,openai}` with matching
+  `--chat-base-url` and `--chat-api-key` flags, allowing non-Ollama chat
+  endpoints for reflection.
+
+### Fixed
+
+- `retrieve()` no longer silently swallows recall-path failures. Each failed
+  path is logged at `WARNING` and increments a failure counter exposed in
+  `metrics()`.
+- Vector backend `delete()` now validates `kind` against an allowlist
+  (`facts`, `episodes`, `journal`) before interpolating table names, removing
+  a latent SQL-injection surface.
+
+### Added
+
+- Regression tests for recall-path failure visibility, `from_env()`
+  validation, vector backend table allowlist, MCP chat-adapter selection, and
+  polyphonic source-attribution counters.
+
+## [Unreleased]
 
 ### Fixed
 

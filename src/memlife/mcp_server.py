@@ -78,6 +78,9 @@ def create_server(
     base_url: str = "http://localhost:11434",
     chat_model: str = "",  # MF-011: caller must provide
     critic_model: str = "",  # MF-011: caller must provide
+    chat_adapter: str = "ollama",  # 0.6.12: ollama or openai
+    chat_base_url: str = "",
+    chat_api_key: str = "",
     reflection_timeout: float = 0.0,
     reflection_total_timeout: float = 0.0,
     memorias_extraction: bool = False,
@@ -119,7 +122,7 @@ def create_server(
     _chat_adapter = None
 
     async def _get_reflector():
-        """Lazily create a persistent Reflector with an Ollama chat adapter.
+        """Lazily create a persistent Reflector with the chosen chat adapter.
 
         The Reflector is created once and reused across calls so that
         _last_contradiction_scan persists between reflection passes (see
@@ -128,19 +131,27 @@ def create_server(
         """
         nonlocal _reflector, _chat_adapter
         if _reflector is None:
+            from memlife.adapters.openai import OpenAIChat
             from memlife.adapters.ollama import OllamaChat
             from memlife.reflection import Reflector
 
-            _chat_adapter = OllamaChat(
-                base_url=base_url,
-                model=chat_model,
-                fallback_models=[critic_model],
-            )
+            if chat_adapter == "openai":
+                _chat_adapter = OpenAIChat(
+                    base_url=chat_base_url or base_url,
+                    api_key=chat_api_key or None,
+                    model=chat_model,
+                )
+            else:
+                _chat_adapter = OllamaChat(
+                    base_url=chat_base_url or base_url,
+                    model=chat_model,
+                    fallback_models=[critic_model],
+                )
             # Expose the adapter to shutdown_mcp_server once created.
             mcp._memlife_chat_adapter = _chat_adapter
 
-            # Reflector calls model_chat.chat(messages, model) — OllamaChat
-            # implements that directly. No wrapper needed.
+            # Reflector calls model_chat.chat(messages, model) — both adapters
+            # implement that directly. No wrapper needed.
             _reflector = Reflector(
                 memory=store,
                 model_chat=_chat_adapter,
@@ -619,6 +630,22 @@ def main():
         help="Ollama model for reflection critic pass (optional)",
     )
     parser.add_argument(
+        "--chat-adapter",
+        choices=["ollama", "openai"],
+        default=os.getenv("MEMLIFE_CHAT_ADAPTER", "ollama"),
+        help="Chat adapter for reflection (default: ollama)",
+    )
+    parser.add_argument(
+        "--chat-base-url",
+        default=os.getenv("MEMLIFE_CHAT_BASE_URL", ""),
+        help="Base URL for the chat adapter (e.g. Ollama or OpenAI-compatible endpoint)",
+    )
+    parser.add_argument(
+        "--chat-api-key",
+        default=os.getenv("MEMLIFE_CHAT_API_KEY", ""),
+        help="API key for the chat adapter (OpenAI-compatible endpoints)",
+    )
+    parser.add_argument(
         "--vector-backend",
         default=os.getenv("MEMLIFE_VECTOR_BACKEND", "json"),
         choices=["json", "sqlite_vec", "binary"],
@@ -672,6 +699,9 @@ def main():
         base_url=args.ollama_url,
         chat_model=args.chat_model,
         critic_model=args.critic_model,
+        chat_adapter=args.chat_adapter,
+        chat_base_url=args.chat_base_url,
+        chat_api_key=args.chat_api_key,
         reflection_timeout=args.reflection_timeout,
         reflection_total_timeout=args.reflection_total_timeout,
         memorias_extraction=args.memorias_extraction,

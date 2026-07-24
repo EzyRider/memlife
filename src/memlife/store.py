@@ -124,6 +124,11 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
             "voice_hits_source": 0,
             "voice_hits_veracity": 0,
             "voice_hits_recency": 0,
+            "query_embed_failures": 0,
+            "graph_expansion_failures": 0,
+            "episode_vector_recall_failures": 0,
+            "fact_recall_failures": 0,
+            "journal_vector_recall_failures": 0,
         }
 
     def _init_vector_backend(self) -> None:

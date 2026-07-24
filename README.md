@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.11**
+**Current version: 0.6.12**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -224,6 +224,14 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > checksum errors. Use a local, non-synced directory. If you still see locking
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
+
+## What's new in 0.6.12
+
+- `MemoryConfig.from_env()` validates environment configuration before returning.
+- `retrieve()` logs and counts recall-path failures instead of silently swallowing them.
+- Vector backend `delete()` rejects unknown table kinds via an explicit allowlist.
+- MCP server supports `--chat-adapter {ollama,openai}` for non-Ollama reflection endpoints.
+- Polyphonic recall counters now report source attribution per fused candidate.
 
 ## What's new in 0.6.11
 

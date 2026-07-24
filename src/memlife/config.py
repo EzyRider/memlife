@@ -316,7 +316,7 @@ class MemoryConfig:
                 return default
             return val.strip().lower() in ("1", "true", "yes", "on")
 
-        return cls(
+        cfg = cls(
             db_path=os.getenv("MEMLIFE_DB_PATH", ""),
             data_dir=os.getenv("MEMLIFE_DATA_DIR", "./memlife_data"),
             namespace=os.getenv("MEMLIFE_NAMESPACE", "_default"),
@@ -376,3 +376,5 @@ class MemoryConfig:
             use_graph_retrieval=_bool("MEMLIFE_USE_GRAPH_RETRIEVAL", False),
             graph_retrieval_weight=float(os.getenv("MEMLIFE_GRAPH_RETRIEVAL_WEIGHT", "0.15")),
         )
+        cfg.validate()
+        return cfg

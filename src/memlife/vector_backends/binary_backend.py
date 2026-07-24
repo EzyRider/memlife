@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_TABLES = {"facts", "episodes", "journal"}
+
 
 class BinaryVectorBackend(VectorBackend):
     """Store embeddings as compact binary vectors and search with Hamming distance.
@@ -114,6 +116,8 @@ class BinaryVectorBackend(VectorBackend):
         dim: int,
     ) -> bool:
         """Clear the ``embedding_json`` column for the item."""
+        if kind not in _TABLES:
+            raise ValueError(f"invalid vector table kind: {kind}")
         table = self._table_for_kind(kind)
         if not table:
             return False
@@ -131,6 +135,8 @@ class BinaryVectorBackend(VectorBackend):
         limit: int = 20,
     ) -> list[VectorSearchResult]:
         """Hamming-distance search over packed binary vectors for ``kind``."""
+        if kind not in _TABLES:
+            raise ValueError(f"invalid vector table kind: {kind}")
         table, extra_filter = self._table_and_filter_for_kind(kind)
         if not table:
             return []

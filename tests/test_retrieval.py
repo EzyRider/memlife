@@ -108,6 +108,43 @@ async def test_retrieve_blended_ranking_prefers_matching_layer(store, config):
 
 
 @pytest.mark.asyncio
+async def test_retrieve_failure_increments_counters_and_warns(store, config, monkeypatch, caplog):
+    """When a recall path fails, retrieve() logs a warning and increments counters."""
+    async def _broken_recall_facts(*args, **kwargs):
+        raise RuntimeError("embedder down")
+
+    monkeypatch.setattr(store, "recall_facts", _broken_recall_facts)
+    await store.store_fact("User prefers dark mode", confidence=0.9)
+
+    with caplog.at_level("WARNING", logger="memlife.retrieval"):
+        context = await retrieve(store, "dark mode", config)
+
+    assert "fact_recall_failures" in store._recall_counters
+    assert store._recall_counters["fact_recall_failures"] == 1
+    assert any("fact recall failed" in rec.message for rec in caplog.records)
+    # Retrieval still returns gracefully (empty or text-only from other paths).
+    assert isinstance(context, str)
+
+
+@pytest.mark.asyncio
+async def test_retrieve_query_embed_failure_increments_counter(store, config, monkeypatch, caplog):
+    """When query embedding fails, retrieve() logs a warning and increments counters."""
+
+    async def _broken_embed(*args, **kwargs):
+        raise RuntimeError("embedder down")
+
+    await store.store_fact("User prefers dark mode", confidence=0.9)
+    monkeypatch.setattr(store, "embed_texts", _broken_embed)
+
+    with caplog.at_level("WARNING", logger="memlife.retrieval"):
+        context = await retrieve(store, "dark mode", config)
+
+    assert store._recall_counters["query_embed_failures"] == 1
+    assert any("query embed failed" in rec.message for rec in caplog.records)
+    assert isinstance(context, str)
+
+
+@pytest.mark.asyncio
 async def test_retrieve_layer_aware_decay(store, config):
     """Facts decay slower than episodes under layer-aware halflifes."""
     config.fact_decay_halflife_days = 365.0

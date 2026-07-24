@@ -243,6 +243,46 @@ async def test_memory_store_logs_episode_when_enabled(tmp_path):
     mcp._memlife_store.close()
 
 
+def test_create_server_chat_adapter_openai(tmp_path):
+    """create_server can wire reflection to the OpenAI chat adapter."""
+    from memlife.adapters.openai import OpenAIChat
+
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_openai.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        chat_adapter="openai",
+        chat_base_url="https://api.openai.com/v1",
+        chat_api_key="sk-test",
+        chat_model="gpt-4o-mini",
+    )
+    # Trigger reflector creation.
+    import asyncio
+    reflector = asyncio.run(mcp._memlife_get_reflector())
+    assert isinstance(mcp._memlife_chat_adapter, OpenAIChat)
+    assert mcp._memlife_chat_adapter.model == "gpt-4o-mini"
+    assert mcp._memlife_chat_adapter._base_url == "https://api.openai.com/v1"
+    mcp._memlife_store.close()
+
+
+def test_create_server_chat_adapter_ollama_default(tmp_path):
+    """create_server defaults to the Ollama chat adapter."""
+    from memlife.adapters.ollama import OllamaChat
+
+    mcp = create_server(
+        db_path=str(tmp_path / "mcp_ollama.db"),
+        embedder_type="dummy",
+        embedding_model="dummy",
+        chat_adapter="ollama",
+        chat_model="qwen3.5:cloud",
+    )
+    import asyncio
+    reflector = asyncio.run(mcp._memlife_get_reflector())
+    assert isinstance(mcp._memlife_chat_adapter, OllamaChat)
+    assert mcp._memlife_chat_adapter.model == "qwen3.5:cloud"
+    mcp._memlife_store.close()
+
+
 @pytest.mark.asyncio
 async def test_memory_reflect_tool_returns_error_on_missing_chat_model(tmp_path):
     """memory_reflect reports a clear error when no chat model is configured."""

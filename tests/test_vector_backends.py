@@ -302,9 +302,21 @@ def test_binary_backend_search_filters_contradictions(store):
 
 
 def test_binary_backend_unavailable_for_unknown_kind(store):
-    """Searching an unknown kind returns an empty list safely."""
+    """Searching or deleting an unknown kind raises ValueError."""
     backend = BinaryVectorBackend(store)
-    assert backend.search("unknown", [1.0, -1.0], limit=5) == []
+    with pytest.raises(ValueError, match="invalid vector table kind"):
+        backend.search("unknown", [1.0, -1.0], limit=5)
+    with pytest.raises(ValueError, match="invalid vector table kind"):
+        backend.delete("unknown", "id", dim=4)
+
+
+def test_json_backend_invalid_kind_raises(store):
+    """JSON backend search/delete reject unknown kinds."""
+    backend = store.vector_backend
+    with pytest.raises(ValueError, match="invalid vector table kind"):
+        backend.search("unknown", [1.0, 0.0], limit=5)
+    with pytest.raises(ValueError, match="invalid vector table kind"):
+        backend.delete("unknown", "id", dim=4)
 
 
 @pytest.mark.asyncio

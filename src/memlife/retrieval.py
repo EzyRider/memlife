@@ -383,7 +383,8 @@ async def retrieve(
     try:
         query_vec = (await store.embed_texts([query]) or [None])[0]
     except Exception as exc:
-        logger.debug("query embed failed: %s", exc)
+        counters["query_embed_failures"] += 1
+        logger.warning("query embed failed: %s", exc)
 
     candidates: list[_RecallSignals] = []
 
@@ -394,7 +395,8 @@ async def retrieve(
     try:
         graph_candidates = _graph_expand(store, query, query_tokens, config)
     except Exception as exc:
-        logger.debug("graph expansion failed: %s", exc)
+        counters["graph_expansion_failures"] += 1
+        logger.warning("graph expansion failed: %s", exc)
     if graph_candidates:
         counters["graph_candidates"] = counters.get("graph_candidates", 0) + len(graph_candidates)
         candidates.extend(graph_candidates)
@@ -411,7 +413,8 @@ async def retrieve(
                 query_vec, limit=config.recall_episodes * 2
             )
         except Exception as exc:
-            logger.debug("episode vector recall failed: %s", exc)
+            counters["episode_vector_recall_failures"] += 1
+            logger.warning("episode vector recall failed: %s", exc)
     if not episodes:
         episodes = store.recall(query, limit=config.recall_episodes * 2)
         if query_vec is not None:
@@ -457,7 +460,8 @@ async def retrieve(
             query_vector=query_vec,
         )
     except Exception as exc:
-        logger.debug("fact recall failed: %s", exc)
+        counters["fact_recall_failures"] += 1
+        logger.warning("fact recall failed: %s", exc)
         facts = []
 
     counters["facts_considered"] += len(facts)
@@ -490,7 +494,8 @@ async def retrieve(
                 limit=config.recall_journal * 2,
             )
         except Exception as exc:
-            logger.debug("journal vector recall failed: %s", exc)
+            counters["journal_vector_recall_failures"] += 1
+            logger.warning("journal vector recall failed: %s", exc)
     if not notes:
         notes = store.journal_relevant(query, limit=config.recall_journal * 2)
         if query_vec is not None:
@@ -540,23 +545,23 @@ async def retrieve(
             "recency": sorted(pool, key=lambda c: c.recency, reverse=True),
         }
         pool = polyphonic.fuse_candidates(voice_groups, config)[:top_n]
-        # Count how many candidates each voice contributed to the fused pool.
-        voice_ids = {c.item.id for c in pool if getattr(c.item, "id", None)}
-        counters["voice_hits_vector"] += len(
-            [c for c in voice_groups["vector"][:top_n] if getattr(c.item, "id", "") in voice_ids]
-        )
-        counters["voice_hits_text"] += len(
-            [c for c in voice_groups["text"][:top_n] if getattr(c.item, "id", "") in voice_ids]
-        )
-        counters["voice_hits_source"] += len(
-            [c for c in voice_groups["source"][:top_n] if getattr(c.item, "id", "") in voice_ids]
-        )
-        counters["voice_hits_veracity"] += len(
-            [c for c in voice_groups["veracity"][:top_n] if getattr(c.item, "id", "") in voice_ids]
-        )
-        counters["voice_hits_recency"] += len(
-            [c for c in voice_groups["recency"][:top_n] if getattr(c.item, "id", "") in voice_ids]
-        )
+        # Count source attribution per fused candidate: attribute to the voice
+        # that ranked the candidate highest (lowest rank). This reflects which
+        # signal was the dominant reason each candidate reached the final pool.
+        candidate_ranks: dict[str, dict[str, int]] = {}
+        for voice, ranking in voice_groups.items():
+            for rank, candidate in enumerate(ranking, start=1):
+                cid = getattr(candidate.item, "id", "")
+                if cid:
+                    candidate_ranks.setdefault(cid, {})[voice] = rank
+        for c in pool:
+            cid = getattr(c.item, "id", "")
+            if not cid:
+                continue
+            ranks = candidate_ranks.get(cid, {})
+            if ranks:
+                best_voice = min(ranks, key=lambda v: (ranks[v], list(voice_groups).index(v)))
+                counters[f"voice_hits_{best_voice}"] += 1
 
     selected = await _dedupe_candidates(store, pool, config)
 

@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_TABLES = {"facts", "episodes", "journal"}
+
+
 class JsonVectorBackend(VectorBackend):
     """Store embeddings as JSON (or compressed binary) strings inline.
 
@@ -92,6 +95,8 @@ class JsonVectorBackend(VectorBackend):
 
         The caller is responsible for committing.
         """
+        if kind not in _TABLES:
+            raise ValueError(f"invalid vector table kind: {kind}")
         table = self._table_for_kind(kind)
         if not table:
             return False
@@ -109,6 +114,8 @@ class JsonVectorBackend(VectorBackend):
         limit: int = 20,
     ) -> list[VectorSearchResult]:
         """Brute-force cosine search over all stored vectors for ``kind``."""
+        if kind not in _TABLES:
+            raise ValueError(f"invalid vector table kind: {kind}")
         table, extra_filter = self._table_and_filter_for_kind(kind)
         if not table:
             return []
