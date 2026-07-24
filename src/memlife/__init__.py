@@ -32,7 +32,7 @@ from memlife.vector_backends import (
 )
 from memlife.vectors import cosine, recency_weight
 
-__version__ = "0.6.10"
+__version__ = "0.6.11"
 
 __all__ = [
     "BinaryVectorBackend",

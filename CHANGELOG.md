@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-07-24
+
+### Fixed
+
+- GitHub Actions test matrix now uses Python 3.11 and 3.12 only, removing the
+  obsolete Python 3.10 job that failed after the minimum version was raised.
+
 ## [0.6.10] - 2026-07-24
 
 ### Changed
