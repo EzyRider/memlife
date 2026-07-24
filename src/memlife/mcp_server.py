@@ -131,8 +131,8 @@ def create_server(
         """
         nonlocal _reflector, _chat_adapter
         if _reflector is None:
-            from memlife.adapters.openai import OpenAIChat
             from memlife.adapters.ollama import OllamaChat
+            from memlife.adapters.openai import OpenAIChat
             from memlife.reflection import Reflector
 
             if chat_adapter == "openai":
