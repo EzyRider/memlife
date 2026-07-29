@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memlife"
-version = "0.6.12"
+version = "0.6.13"
 description = "Memory that degrades gracefully — four-tier lifecycle memory for AI agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,7 +30,7 @@ sqlite-vec = [
     "sqlite-vec",
     "pysqlite3-binary ; platform_system=='Linux'",
 ]
-mcp = ["mcp"]
+mcp = ["mcp>=1.4.0,<2.0"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [project.scripts]

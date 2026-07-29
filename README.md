@@ -6,7 +6,7 @@ Memory that degrades gracefully. Not another pile that grows forever.
 [![Python](https://img.shields.io/pypi/pyversions/memlife.svg)](https://pypi.org/project/memlife/)
 [![License](https://img.shields.io/pypi/l/memlife.svg)](https://github.com/EzyRider/memlife/blob/main/LICENSE)
 
-**Current version: 0.6.12**
+**Current version: 0.6.13**
 
 memlife is a four-tier lifecycle memory system for AI agents. Instead of treating memory as a monotonically growing database, every entry has a lifecycle — facts decay, journal entries retire, superseded data is pruned, and nothing accumulates forever.
 
@@ -224,6 +224,11 @@ Resources include `memlife://stats`, `memlife://health`, and `memlife://contradi
 > checksum errors. Use a local, non-synced directory. If you still see locking
 > errors on Windows, set `sqlite_journal_mode="DELETE"` in `MemoryConfig` to
 > disable WAL mode.
+
+## What's new in 0.6.13
+
+- **Critical fix: `MemoryConfig.fact_merge_threshold` / `fact_conflict_threshold` are now honoured by the store.** Previously the store hardcoded 0.90/0.75 while the Reflector correctly read the config values, so deduplication and conflict detection could disagree. The store now sources both thresholds from `MemoryConfig`.
+- **JSONL export/import now covers the full schema.** `export_jsonl` / `import_jsonl` previously only handled `episodes`, `facts`, `journal`, and `sessions`, silently dropping the entity graph (`temporal_triples`, `entities`, `entity_aliases`, `triple_provenance`), reflection history (`agent_runs`, `checkpoints`, `reflection_queue`, `reflection_metrics`, `reflection_passes`), the embedding cache, the `episode_tools` index, and the `is_gap_marker` flag. A regression test now asserts every schema table is represented in an export.
 
 ## What's new in 0.6.12
 

@@ -91,7 +91,13 @@ def create_server(
 
     Returns a configured FastMCP instance ready to run.
     """
-    from mcp.server.fastmcp import FastMCP
+    # MCP SDK layout changed around 1.6.x. Try both the legacy module path
+    # (used by the currently pinned 1.4.x range) and the newer top-level
+    # `mcp.server` attribute re-export.
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ModuleNotFoundError:  # pragma: no cover
+        from mcp.server import FastMCP
 
     config_kwargs = {
         "db_path": db_path,

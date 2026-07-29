@@ -94,15 +94,13 @@ class MemoryStore(SchemaMixin, RunMixin, GCMixin, TripleMixin, EmbedMixin, Episo
         # Embedding model name from config — stored with each vector for versioning.
         self.embedding_model_name: str = config.embedding_model
         # Cosine above which two facts are treated as the same fact at store
-        # time and merged (the loser superseded). Set from Config by the agent;
-        # tests construct MemoryStore directly so this default is the source of
-        # truth when unwired. See Config.fact_merge_threshold / fact_conflict_threshold.
-        self.fact_merge_threshold: float = 0.90
+        # time and merged (the loser superseded). Sourced from config so the
+        # store and Reflector use the same thresholds. Config already validates
+        # the range [0, 1] with a sensible default.
+        self.fact_merge_threshold: float = config.fact_merge_threshold
         # Cosine above which two facts are treated as a candidate contradiction
-        # (flagged in reflection, not auto-merged). Set from Config by the agent;
-        # same default-sourcing pattern as fact_merge_threshold above.
-        # MF-008: was missing — check_conflicts() raised AttributeError.
-        self.fact_conflict_threshold: float = 0.75
+        # (flagged in reflection, not auto-merged). Sourced from config.
+        self.fact_conflict_threshold: float = config.fact_conflict_threshold
         # Consecutive embedding failure counter — resets on success, escalates
         # logging at 5+. Exposed in embedding_health() for /stats.
         self._embed_failures: int = 0

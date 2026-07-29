@@ -141,6 +141,61 @@ async def test_import_export_jsonl(store, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_export_jsonl_covers_all_schema_tables(store, tmp_path):
+    """Every schema table must be represented in a JSONL export result."""
+    from memlife import export_jsonl
+
+    # Hardcode the expected table list so the test fails if a new table is
+    # added to _schema.py but not to export_jsonl / import_jsonl.
+    expected_tables = {
+        "episodes", "agent_runs", "checkpoints", "facts", "journal",
+        "reflection_queue", "sessions", "reflection_metrics",
+        "reflection_passes", "episode_tools", "temporal_triples",
+        "entities", "entity_aliases", "triple_provenance",
+        "embedding_cache",
+    }
+
+    # Touch as many tables as practical so the export has rows to count.
+    store.remember(task="episode with tool", outcome="success", tool_calls=[{"tool": "read_file"}])
+    await store.store_fact("a fact", confidence=0.7)
+    store.add_journal_entry("observation", "an observation", confidence=0.8)
+    store.store_triple("subject", "predicate", "object", confidence=0.7)
+    store.add_entity_alias("James", "Jimmy")
+
+    export_path = str(tmp_path / "full_export.jsonl")
+    result = export_jsonl(store, export_path)
+
+    for table in expected_tables:
+        assert table in result, f"missing count for table {table}"
+    assert result["total"] > 0
+
+    # Also verify migration_status reports no missing tables on this fresh DB.
+    status = store.migration_status()
+    assert status["tables_expected"] == status["tables_present"]
+    assert not status["missing_tables"]
+
+
+@pytest.mark.asyncio
+async def test_store_thresholds_read_from_config(tmp_path):
+    """MemoryConfig.fact_merge_threshold / fact_conflict_threshold reach the store."""
+    from memlife import DummyEmbedder, MemoryConfig, MemoryStore
+
+    db = str(tmp_path / "thresholds.db")
+    cfg = MemoryConfig(
+        db_path=db,
+        embedding_model="dummy",
+        fact_merge_threshold=0.85,
+        fact_conflict_threshold=0.60,
+    )
+    store = MemoryStore(config=cfg, embedder=DummyEmbedder())
+    try:
+        assert store.fact_merge_threshold == 0.85
+        assert store.fact_conflict_threshold == 0.60
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_resolve_fact_after_revision(store):
     """resolve_fact follows supersession chains without crashing."""
     old_id = await store.store_fact("User lives in Wellington", confidence=0.7)
